@@ -1,2 +1,10 @@
 .DS_Store
 docs/CDN_BS_РАСКУР_DUMP.md
+
+# Operator config: holds CF_API_TOKEN (tech.md §8)
+.env
+.env.*
+!.env.example
+
+# Configs rendered for manual copy into the panel (remnawave::emit)
+out/

@@ -1,0 +1,4 @@
+# Resolve `# shellcheck source=` paths from each script's directory and follow them,
+# so a plain `shellcheck deploy.sh lib/*.sh` checks modules together from any cwd.
+source-path=SCRIPTDIR
+external-sources=true
