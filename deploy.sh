@@ -5,6 +5,8 @@ set -Eeuo pipefail
 
 # shellcheck source=lib/common.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib/common.sh"
+# shellcheck source=lib/prompt.sh
+source "$REPO_ROOT/lib/prompt.sh"
 
 # set -e alone exits without a word; name the command that failed.
 trap 'log::error "unexpected failure (exit $?) at ${BASH_SOURCE[0]##*/}:$LINENO: $BASH_COMMAND"' ERR
