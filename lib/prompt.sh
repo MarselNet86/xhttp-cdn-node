@@ -242,27 +242,15 @@ prompt::_ask_issue_cdn_cert() {
 
 # --- .env -----------------------------------------------------------------------------
 
-# Writes .env atomically with mode 600, since it holds CF_API_TOKEN. An identical
-# file is left as it is.
+# Writes .env with mode 600, since it holds CF_API_TOKEN.
 prompt::_write_env() {
-  local key content tmp
+  local key
   for key in "${ENV_KEYS[@]}"; do
     if [[ "${!key:-}" == *\'* && "${!key:-}" == *\"* ]]; then
       log::die "$EXIT_INPUT" "$key holds both ' and \": .env cannot keep it, fix it in $ENV_FILE"
     fi
   done
-  content="$(prompt::_render_env)"
-  if [[ -f "$ENV_FILE" && "$(<"$ENV_FILE")" == "$content" ]]; then
-    chmod 600 "$ENV_FILE"
-    log::info "$ENV_FILE is up to date"
-    return 0
-  fi
-  tmp="$(mktemp "$ENV_FILE.XXXXXX")" || log::die "$EXIT_FAILURE" "cannot create a file next to $ENV_FILE"
-  if ! printf '%s\n' "$content" >"$tmp" || ! chmod 600 "$tmp" || ! mv -f "$tmp" "$ENV_FILE"; then
-    rm -f "$tmp"
-    log::die "$EXIT_FAILURE" "cannot write $ENV_FILE"
-  fi
-  log::info "wrote $ENV_FILE with mode 600"
+  fs::write "$ENV_FILE" 600 "$(prompt::_render_env)"
 }
 
 prompt::_render_env() {
