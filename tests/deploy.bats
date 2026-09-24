@@ -45,7 +45,7 @@ step_line() {
   [ "$status" -eq 0 ]
   [[ "$output" == "cdn-deploy dry run: nothing is changed."* ]]
   steps="$(printf '%s\n' "$output" | sed -nE 's/^ +[0-9]+\. ([a-z-]+) .*/\1/p' | tr '\n' ' ')"
-  [ "$steps" = "preflight input config packages sysctl certs renew-hook nginx remnawave validate " ]
+  [ "$steps" = "preflight input config packages certs renew-hook sysctl nginx remnawave validate " ]
 }
 
 @test "--dry-run on empty input shows the contract defaults and unset required values" {
