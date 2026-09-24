@@ -50,6 +50,8 @@ stub() {
 }
 
 # Every stub appends its call to $STUB_DIR/calls; marker files in $STUB_DIR make them fail.
+# $STUB_DIR/live-id models the config nginx runs: reload and start load the config id from
+# the site on disk, and curl reads it back the way the loopback probe would.
 stubs() {
   # Like nginx, prints a notice on a successful reload.
   stub nginx <<'EOF'
@@ -64,13 +66,30 @@ if [ "$1" = -s ]; then
     exit 1
   fi
   echo "nginx: [notice] signal process started" >&2
+  # The master keeps the old config when it cannot apply the new one, a busy port say.
+  if [ ! -e "$STUB_DIR/reload-ignored" ]; then
+    sed -n 's/.*return 200 "\(.*\)";.*/\1/p' \
+      "$CDN_DEPLOY_SYSROOT/etc/nginx/sites-available/cdn-deploy.conf" >"$STUB_DIR/live-id"
+  fi
 fi
 EOF
   stub systemctl <<'EOF'
 echo "systemctl $*" >>"$STUB_DIR/calls"
 case "$1" in
   is-active) [ ! -e "$STUB_DIR/nginx-down" ] ;;
+  start)
+    rm -f "$STUB_DIR/nginx-down"
+    sed -n 's/.*return 200 "\(.*\)";.*/\1/p' \
+      "$CDN_DEPLOY_SYSROOT/etc/nginx/sites-available/cdn-deploy.conf" >"$STUB_DIR/live-id"
+    ;;
 esac
+EOF
+  stub curl <<'EOF'
+echo "curl $*" >>"$STUB_DIR/calls"
+if [ -e "$STUB_DIR/nginx-down" ] || [ ! -f "$STUB_DIR/live-id" ]; then
+  exit 7
+fi
+cat "$STUB_DIR/live-id"
 EOF
 }
 
@@ -152,6 +171,15 @@ has() {
   has "$SITE" 'ssl_certificate /etc/letsencrypt/live/vless.example.com/fullchain.pem;'
 }
 
+@test "the config id endpoint answers only the loopback" {
+  run nginx::render
+  [ "$status" -eq 0 ]
+  # return runs before allow/deny in nginx, so only an if guards a returning location.
+  grep -A3 -F 'location = /cdn-deploy-config {' "$SITE" | grep -qF "if (\$remote_addr != 127.0.0.1) {"
+  run grep -E '^\s*(allow|deny) ' "$SITE"
+  [ "$status" -eq 1 ]
+}
+
 @test "a missing certificate exits 7 and changes nothing" {
   local before
   rm "$ROOT/etc/letsencrypt/live/cdn.example.com/privkey.pem"
@@ -204,8 +232,9 @@ has() {
   run nginx::render
   [ "$status" -eq 0 ]
   [ "$(snapshot "$ROOT")" = "$before" ]
-  [[ "$output" == *"nginx config is up to date"* ]]
+  [[ "$output" == *"nginx config is up to date and serving"* ]]
   [ "$(calls '^nginx')" -eq 0 ]
+  [ "$(calls '^curl')" -eq 1 ]
 }
 
 @test "a changed setting goes through nginx -t and one reload" {
@@ -215,7 +244,8 @@ has() {
   XHTTP_PORT=4450
   run nginx::render
   [ "$status" -eq 0 ]
-  [ "$(tr '\n' '|' <"$TMP/calls")" = "nginx -t|systemctl is-active --quiet nginx|nginx -s reload|" ]
+  [ "$(calls '^nginx -t')" -eq 1 ]
+  [ "$(calls '^nginx -s reload')" -eq 1 ]
   has "$SITE" 'server 127.0.0.1:4450;'
   [[ "$output" != *"signal process started"* ]]
 }
@@ -248,4 +278,47 @@ has() {
   [[ "$output" == *"placeholder that nginx::render does not fill"* ]]
   [ "$(snapshot "$ROOT")" = "$before" ]
   [ "$(calls .)" -eq 0 ]
+}
+
+@test "render returns once nginx serves the new config, ten probes in a row" {
+  run nginx::render
+  [ "$status" -eq 0 ]
+  [ "$(calls "^curl -sk --max-time 2 --resolve cdn.example.com:8444:127.0.0.1 https://cdn.example.com:8444/cdn-deploy-config")" -eq 10 ]
+  [ "$(cat "$TMP/live-id")" = "$(sed -n 's/.*return 200 "\(.*\)";.*/\1/p' "$SITE")" ]
+  [[ "$(cat "$TMP/live-id")" =~ ^[0-9a-f]{16}$ ]]
+  [[ "$output" == *"nginx serves the new config"* ]]
+}
+
+@test "a reload that nginx does not put into service is rolled back and exits 7" {
+  local before
+  touch "$TMP/reload-ignored"
+  before="$(snapshot "$ROOT/etc/nginx" | grep -v cdn-deploy-orig)"
+  run nginx::render
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"did not put the new config into service"* ]]
+  [[ "$output" == *"port 8444 taken by another program"* ]]
+  [ "$(snapshot "$ROOT/etc/nginx" | grep -v cdn-deploy-orig)" = "$before" ]
+}
+
+@test "matching files with an older config in service still get a reload" {
+  run nginx::render
+  [ "$status" -eq 0 ]
+  echo 0000000000000000 >"$TMP/live-id"
+  : >"$TMP/calls"
+  run nginx::render
+  [ "$status" -eq 0 ]
+  [ "$(calls '^nginx -t')" -eq 1 ]
+  [ "$(calls '^nginx -s reload')" -eq 1 ]
+  [[ "$output" == *"nginx serves the new config"* ]]
+}
+
+@test "the config id follows the settings and stays put without changes" {
+  local first
+  run nginx::render
+  first="$(cat "$TMP/live-id")"
+  run nginx::render
+  [ "$(cat "$TMP/live-id")" = "$first" ]
+  XHTTP_PORT=4450
+  run nginx::render
+  [ "$(cat "$TMP/live-id")" != "$first" ]
 }
