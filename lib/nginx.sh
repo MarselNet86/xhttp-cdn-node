@@ -20,18 +20,23 @@ readonly NGINX_SITE=/etc/nginx/sites-available/cdn-deploy.conf
 readonly NGINX_SITE_LINK=/etc/nginx/sites-enabled/cdn-deploy.conf
 readonly NGINX_DEFAULT_LINK=/etc/nginx/sites-enabled/default
 
-# Renders both templates and applies them. A config that nginx -t rejects is rolled back
-# before any reload, so the running nginx keeps the previous one (exit 7).
+# Renders both templates and applies them, and returns only once nginx serves the result.
+# A config that nginx -t rejects, or that nginx does not put into service after the
+# reload, is rolled back, so the previous one keeps serving (exit 7).
 nginx::render() {
-  local cert_dir main site saved changed=0
-  require::cmd nginx envsubst
+  local cert_dir main site id saved changed=0
+  require::cmd nginx envsubst curl
   env::require VLESS_DOMAIN CDN_DOMAIN XHTTP_PORT XHTTP_PATH NGINX_TLS_PORT CERT_MODE
   cert_dir="$(nginx::_cert_dir)"
   if [[ ! -r "$SYSROOT$cert_dir/fullchain.pem" || ! -r "$SYSROOT$cert_dir/privkey.pem" ]]; then
     log::die "$EXIT_NGINX" "no certificate in $cert_dir: the certs step issues it, rerun ./deploy.sh"
   fi
-  main="$(nginx::_template nginx.conf.tmpl "$cert_dir")" || log::die "$EXIT_NGINX" "cannot render templates/nginx.conf.tmpl"
-  site="$(nginx::_template site-8444.conf.tmpl "$cert_dir")" || log::die "$EXIT_NGINX" "cannot render templates/site-8444.conf.tmpl"
+  main="$(nginx::_template nginx.conf.tmpl "$cert_dir" "")" || log::die "$EXIT_NGINX" "cannot render templates/nginx.conf.tmpl"
+  site="$(nginx::_template site-8444.conf.tmpl "$cert_dir" "")" || log::die "$EXIT_NGINX" "cannot render templates/site-8444.conf.tmpl"
+  # The id names this exact render; nginx serves it on the loopback, which shows whether
+  # the running config is this one.
+  id="$(printf '%s\n%s\n' "$main" "$site" | sha256sum | cut -c1-16)"
+  site="$(nginx::_template site-8444.conf.tmpl "$cert_dir" "$id")" || log::die "$EXIT_NGINX" "cannot render templates/site-8444.conf.tmpl"
 
   mkdir -p "$SYSROOT${NGINX_SITE%/*}" "$SYSROOT${NGINX_SITE_LINK%/*}"
   saved="$(mktemp -d)"
@@ -51,9 +56,9 @@ nginx::render() {
     changed=1
   fi
 
-  if ((changed == 0)) && systemctl is-active --quiet nginx; then
+  if ((changed == 0)) && nginx::_serves "$id" 1 1; then
     rm -rf "$saved"
-    log::info "nginx config is up to date"
+    log::info "nginx config is up to date and serving"
     return 0
   fi
   if ! nginx -t >&2; then
@@ -61,8 +66,16 @@ nginx::render() {
     rm -rf "$saved"
     log::die "$EXIT_NGINX" "nginx -t rejects the rendered config, the previous one stays: see the errors above"
   fi
+  # nginx -t does not bind ports, and nginx -s reload succeeds even when the master then
+  # keeps the old config, so only the served id proves the reload.
+  if ! nginx::reload || ! nginx::_serves "$id" 10 100; then
+    nginx::_restore "$saved"
+    rm -rf "$saved"
+    nginx::reload || true
+    log::die "$EXIT_NGINX" "nginx did not put the new config into service, the previous one stays: see /var/log/nginx/error.log (port $NGINX_TLS_PORT taken by another program, for one)"
+  fi
   rm -rf "$saved"
-  nginx::reload || log::die "$EXIT_NGINX" "nginx did not take the new config"
+  log::info "nginx serves the new config"
 }
 
 # Reloads nginx, or starts it when it is down. nginx -s reload prints a notice even on
@@ -93,20 +106,39 @@ nginx::_cert_dir() {
   fi
 }
 
-# Renders templates/NAME with the cert directory CERT_DIR. Only the listed placeholders
-# change, so nginx variables such as $request_method stay as they are.
+# Renders templates/NAME with the cert directory CERT_DIR and the config id CONFIG_ID.
+# Only the listed placeholders change, so nginx variables such as $request_method stay.
 nginx::_template() {
   local name="$1" out
   # shellcheck disable=SC2016  # envsubst takes the placeholder list literally
   out="$(XHTTP_PORT="$XHTTP_PORT" XHTTP_PATH="$XHTTP_PATH" NGINX_TLS_PORT="$NGINX_TLS_PORT" \
-    CDN_DOMAIN="$CDN_DOMAIN" VLESS_DOMAIN="$VLESS_DOMAIN" ORIGIN_CERT_DIR="$2" \
-    envsubst '${XHTTP_PORT} ${XHTTP_PATH} ${NGINX_TLS_PORT} ${CDN_DOMAIN} ${VLESS_DOMAIN} ${ORIGIN_CERT_DIR}' \
+    CDN_DOMAIN="$CDN_DOMAIN" VLESS_DOMAIN="$VLESS_DOMAIN" ORIGIN_CERT_DIR="$2" CONFIG_ID="$3" \
+    envsubst '${XHTTP_PORT} ${XHTTP_PATH} ${NGINX_TLS_PORT} ${CDN_DOMAIN} ${VLESS_DOMAIN} ${ORIGIN_CERT_DIR} ${CONFIG_ID}' \
     <"$REPO_ROOT/templates/$name")"
   if [[ "$out" == *"\${"* ]]; then
     log::error "templates/$name has a placeholder that nginx::render does not fill"
     return 1
   fi
   printf '%s' "$out"
+}
+
+# 0 once the origin answers with config id ID in STREAK probes in a row, each on a new
+# connection, within TRIES probes. Old workers keep the old config for a moment after a
+# reload, so a single answer proves little.
+nginx::_serves() {
+  local id="$1" streak="$2" tries="$3" run=0 i
+  for ((i = 0; i < tries && run < streak; i++)); do
+    if [[ "$(curl -sk --max-time 2 --resolve "$CDN_DOMAIN:$NGINX_TLS_PORT:127.0.0.1" \
+      "https://$CDN_DOMAIN:$NGINX_TLS_PORT/cdn-deploy-config" || true)" == "$id" ]]; then
+      run=$((run + 1))
+    else
+      run=0
+    fi
+    if ((run < streak && i + 1 < tries)); then
+      sleep 0.1
+    fi
+  done
+  ((run >= streak))
 }
 
 # --- rollback ---------------------------------------------------------------------------

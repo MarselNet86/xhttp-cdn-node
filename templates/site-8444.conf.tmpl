@@ -55,6 +55,17 @@ server {
         access_log off;
     }
 
+    # lib/nginx.sh reads this after a reload to see the new config serving. Loopback only:
+    # from outside it answers 403 like any other unknown path. return runs before
+    # allow/deny, so the address check has to be an if.
+    location = /cdn-deploy-config {
+        if ($remote_addr != 127.0.0.1) {
+            return 403;
+        }
+        default_type text/plain;
+        return 200 "${CONFIG_ID}";
+    }
+
     location / {
         return 403;
     }
