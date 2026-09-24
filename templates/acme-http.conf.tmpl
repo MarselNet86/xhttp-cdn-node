@@ -1,0 +1,16 @@
+# cdn-deploy, CERT_MODE=http-01 only (tech.md §3): answers Let's Encrypt HTTP-01
+# challenges on :80. Enabled just while certbot issues or renews, then switched off.
+# Rendered by lib/certs.sh from this template; edits on the server are overwritten.
+server {
+    listen 80;
+    server_name ${ACME_DOMAINS};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root ${ACME_WEBROOT};
+        default_type text/plain;
+    }
+
+    location / {
+        return 404;
+    }
+}
