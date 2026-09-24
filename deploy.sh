@@ -9,6 +9,8 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/lib/common.sh"
 source "$REPO_ROOT/lib/prompt.sh"
 # shellcheck source=lib/certs.sh
 source "$REPO_ROOT/lib/certs.sh"
+# shellcheck source=lib/nginx.sh
+source "$REPO_ROOT/lib/nginx.sh"
 
 # set -e alone exits without a word; name the command that failed.
 trap 'log::error "unexpected failure (exit $?) at ${BASH_SOURCE[0]##*/}:$LINENO: $BASH_COMMAND"' ERR
@@ -144,8 +146,8 @@ deploy::describe() {
         "$([[ "${CERT_MODE:-}" == http-01 ]] && printf '; pre/post hooks open :80 for HTTP-01')"
       ;;
     nginx)
-      printf 'templates/ into /etc/nginx/: :%s %s -> 127.0.0.1:%s; drop %s; nginx -t; reload' \
-        "$tls_port" "$cdn" "$xhttp_port" "sites-enabled/default"
+      printf 'templates/ into /etc/nginx/: :%s %s (certificate of %s) -> 127.0.0.1:%s; drop %s; nginx -t; reload' \
+        "$tls_port" "$cdn" "$(deploy::origin_cert_domain)" "$xhttp_port" "sites-enabled/default"
       ;;
     remnawave) printf 'render out/remnawave/ (xhttp inbound, host extra) to paste into the panel' ;;
     validate)
@@ -155,14 +157,20 @@ deploy::describe() {
   esac
 }
 
-# http-01 cannot validate CDN_DOMAIN (a CNAME to the CDN), so that mode forces
-# ISSUE_CDN_ORIGIN_CERT=false and origin nginx reuses the VLESS certificate (tech.md §4).
 deploy::cert_domains() {
   printf '%s %s' "$(deploy::show VLESS_DOMAIN)" "$(deploy::show HY2_DOMAIN)"
-  if [[ "${CERT_MODE:-}" != http-01 && "${ISSUE_CDN_ORIGIN_CERT:-}" == true ]]; then
+  if env::cdn_has_cert; then
     printf ' %s' "$(deploy::show CDN_DOMAIN)"
   else
     printf ' (origin :%s reuses the VLESS_DOMAIN certificate)' "$(deploy::show NGINX_TLS_PORT)"
+  fi
+}
+
+deploy::origin_cert_domain() {
+  if env::cdn_has_cert; then
+    deploy::show CDN_DOMAIN
+  else
+    deploy::show VLESS_DOMAIN
   fi
 }
 
