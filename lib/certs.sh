@@ -201,22 +201,24 @@ certs::_acme_on() {
   fi
 }
 
-# nginx -s reload returns before the new config takes requests, and the CA may check a
-# challenge within milliseconds. Waits until a probe file comes back through :80.
+# nginx -s reload returns before the new config takes requests, and old workers accept
+# connections with the old config for a moment longer, while the CA checks a challenge
+# within milliseconds. One good answer proves little: waits for ten probes in a row,
+# each on a new connection, for up to 10 s.
 certs::_wait_for_acme() {
-  local token="probe-$$-$RANDOM" file="$SYSROOT$CERTS_WEBROOT$CERTS_PROBE" i answer
+  local token="probe-$$-$RANDOM" file="$SYSROOT$CERTS_WEBROOT$CERTS_PROBE" tries streak=0
   mkdir -p "${file%/*}"
   printf '%s' "$token" >"$file"
-  for ((i = 0; i < 20; i++)); do
-    answer="$(curl -s --max-time 2 -H "Host: $VLESS_DOMAIN" "http://127.0.0.1$CERTS_PROBE" || true)"
-    if [[ "$answer" == "$token" ]]; then
-      rm -f "$file"
-      return 0
+  for ((tries = 0; tries < 100 && streak < 10; tries++)); do
+    if [[ "$(curl -s --max-time 2 -H "Host: $VLESS_DOMAIN" "http://127.0.0.1$CERTS_PROBE" || true)" == "$token" ]]; then
+      streak=$((streak + 1))
+    else
+      streak=0
     fi
-    sleep 0.5
+    sleep 0.1
   done
   rm -f "$file"
-  return 1
+  ((streak >= 10))
 }
 
 certs::_acme_off() {
@@ -287,19 +289,26 @@ if ! nginx -t -q; then
   exit 1
 fi
 reload || close
-# The reload returns before the new config takes requests: wait for a probe file.
+# Old workers keep the old config for a moment after the reload: wait for ten probes in
+# a row, each on a new connection, for up to 10 s.
 probe=$CERTS_WEBROOT$CERTS_PROBE
 token="probe-\$\$"
 mkdir -p "\${probe%/*}"
 printf '%s' "\$token" >"\$probe"
-i=0
-while [ "\$(curl -s --max-time 2 -H 'Host: $VLESS_DOMAIN' http://127.0.0.1$CERTS_PROBE)" != "\$token" ]; do
-  i=\$((i + 1))
-  if [ "\$i" -ge 20 ]; then
+tries=0
+streak=0
+while [ "\$streak" -lt 10 ]; do
+  if [ "\$(curl -s --max-time 2 -H 'Host: $VLESS_DOMAIN' http://127.0.0.1$CERTS_PROBE)" = "\$token" ]; then
+    streak=\$((streak + 1))
+  else
+    streak=0
+  fi
+  tries=\$((tries + 1))
+  if [ "\$tries" -ge 100 ]; then
     rm -f "\$probe"
     close
   fi
-  sleep 0.5
+  sleep 0.1
 done
 rm -f "\$probe"
 EOF
