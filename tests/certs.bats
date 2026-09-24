@@ -116,6 +116,12 @@ calls() {
   fi
 }
 
+# The link points at the host path of the site, which does not exist under SYSROOT: test
+# the link itself, since -e is false for a dangling link.
+acme_closed() {
+  [ ! -L "$TMP/root/etc/nginx/sites-enabled/cdn-deploy-acme.conf" ]
+}
+
 snapshot() {
   find "$1" -type f -exec cksum {} + | sort
 }
@@ -207,7 +213,7 @@ snapshot() {
   grep -qF 'server_name vless.example.com hy2.example.com;' "$site"
   grep -qF 'root /var/www/cdn-deploy-acme;' "$site"
   [ -d "$TMP/root/var/www/cdn-deploy-acme" ]
-  [ ! -e "$TMP/root/etc/nginx/sites-enabled/cdn-deploy-acme.conf" ]
+  acme_closed
   sequence="$(grep -E '^(nginx|certbot)' "$TMP/calls" |
     sed -E 's/^certbot certonly .*--cert-name ([^ ]+) .*--webroot -w ([^ ]+).*/certbot \1 \2/' |
     tr '\n' '|')"
@@ -219,7 +225,7 @@ snapshot() {
   touch "$TMP/nginx-t-fail"
   run certs::issue
   [ "$status" -eq 6 ]
-  [ ! -e "$TMP/root/etc/nginx/sites-enabled/cdn-deploy-acme.conf" ]
+  acme_closed
   [ "$(calls 'nginx -s reload')" -eq 0 ]
   [ "$(calls '^certbot')" -eq 0 ]
 }
@@ -238,7 +244,7 @@ snapshot() {
   run certs::issue
   [ "$status" -eq 6 ]
   [[ "$output" == *"does not answer on 127.0.0.1:80"* ]]
-  [ ! -e "$TMP/root/etc/nginx/sites-enabled/cdn-deploy-acme.conf" ]
+  acme_closed
   [ "$(calls '^certbot')" -eq 0 ]
 }
 
@@ -248,7 +254,7 @@ snapshot() {
   run certs::issue
   [ "$status" -eq 6 ]
   [[ "$output" == *"nginx -s reload failed: nginx: [error] invalid PID number"* ]]
-  [ ! -e "$TMP/root/etc/nginx/sites-enabled/cdn-deploy-acme.conf" ]
+  acme_closed
   [ "$(calls '^certbot')" -eq 0 ]
 }
 
@@ -257,7 +263,7 @@ snapshot() {
   echo vless.example.com >"$TMP/certbot-fail"
   run certs::issue
   [ "$status" -eq 6 ]
-  [ ! -e "$TMP/root/etc/nginx/sites-enabled/cdn-deploy-acme.conf" ]
+  acme_closed
   [ "$(calls 'nginx -s reload')" -eq 2 ]
   [[ "$output" == *"port 80 is open"* ]]
 }
