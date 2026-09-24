@@ -11,6 +11,8 @@ source "$REPO_ROOT/lib/prompt.sh"
 source "$REPO_ROOT/lib/certs.sh"
 # shellcheck source=lib/nginx.sh
 source "$REPO_ROOT/lib/nginx.sh"
+# shellcheck source=lib/sysctl.sh
+source "$REPO_ROOT/lib/sysctl.sh"
 
 # set -e alone exits without a word; name the command that failed.
 trap 'log::error "unexpected failure (exit $?) at ${BASH_SOURCE[0]##*/}:$LINENO: $BASH_COMMAND"' ERR
@@ -135,7 +137,10 @@ deploy::describe() {
     input) printf 'ask for settings (defaults from an existing .env), write .env (mode 600)' ;;
     config) printf 'load .env over the .env.example defaults, check required settings' ;;
     packages) printf 'install missing: %s' "${PACKAGES[*]}" ;;
-    sysctl) printf 'network tuning into /etc/sysctl.d/, sysctl --system, nofile limits' ;;
+    sysctl)
+      printf '/etc/sysctl.d/99-cdn.conf, reserve ports %s,%s, apply and check; nofile 65535 for nginx and logins' \
+        "$xhttp_port" "$tls_port"
+      ;;
     certs)
       printf "Let's Encrypt via %s: %s; skip certificates valid 30+ days" \
         "$(deploy::show CERT_MODE)" "$(deploy::cert_domains)"
