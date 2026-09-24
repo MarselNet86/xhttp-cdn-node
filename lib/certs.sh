@@ -14,6 +14,7 @@ readonly CERTS_HOOKS=/etc/letsencrypt/renewal-hooks
 readonly CERTS_WEBROOT=/var/www/cdn-deploy-acme
 readonly CERTS_ACME_SITE=/etc/nginx/sites-available/cdn-deploy-acme.conf
 readonly CERTS_ACME_LINK=/etc/nginx/sites-enabled/cdn-deploy-acme.conf
+readonly CERTS_PROBE=/.well-known/acme-challenge/cdn-deploy-probe
 # certbot renews 30 days before expiry, so anything closer is due now.
 readonly CERTS_MIN_DAYS=30
 
@@ -30,7 +31,7 @@ certs::issue() {
       certs::_remove_acme_site
       ;;
     http-01)
-      require::cmd nginx envsubst
+      require::cmd nginx envsubst curl
       certs::_render_acme_site
       ;;
     *) log::die "$EXIT_INPUT" "CERT_MODE=$CERT_MODE: expected dns-cloudflare or http-01, rerun ./deploy.sh" ;;
@@ -72,7 +73,7 @@ certs::issue() {
 # sure certbot.timer runs the renewals (tech.md §8).
 certs::install_renew_hook() {
   local pre="$SYSROOT$CERTS_HOOKS/pre/cdn-deploy-acme.sh" post="$SYSROOT$CERTS_HOOKS/post/cdn-deploy-acme.sh"
-  env::require HY2_DOMAIN NODE_RELOAD_CMD CERT_MODE
+  env::require VLESS_DOMAIN HY2_DOMAIN NODE_RELOAD_CMD CERT_MODE
   mkdir -p "$SYSROOT$CERTS_HOOKS/deploy" "$SYSROOT$CERTS_HOOKS/pre" "$SYSROOT$CERTS_HOOKS/post"
   fs::write "$SYSROOT$CERTS_HOOKS/deploy/cdn-deploy.sh" 755 "$(certs::_deploy_hook)"
   if [[ "$CERT_MODE" == http-01 ]]; then
@@ -191,6 +192,28 @@ certs::_acme_on() {
     log::die "$EXIT_CERTS" "nginx rejects the config with the ACME server: see nginx -t above"
   fi
   certs::_nginx_reload
+  if ! certs::_wait_for_acme; then
+    certs::_acme_off
+    log::die "$EXIT_CERTS" "the ACME server does not answer on 127.0.0.1:80: check that nothing else holds port 80"
+  fi
+}
+
+# nginx -s reload returns before the new config takes requests, and the CA may check a
+# challenge within milliseconds. Waits until a probe file comes back through :80.
+certs::_wait_for_acme() {
+  local token="probe-$$-$RANDOM" file="$SYSROOT$CERTS_WEBROOT$CERTS_PROBE" i answer
+  mkdir -p "${file%/*}"
+  printf '%s' "$token" >"$file"
+  for ((i = 0; i < 20; i++)); do
+    answer="$(curl -s --max-time 2 -H "Host: $VLESS_DOMAIN" "http://127.0.0.1$CERTS_PROBE" || true)"
+    if [[ "$answer" == "$token" ]]; then
+      rm -f "$file"
+      return 0
+    fi
+    sleep 0.5
+  done
+  rm -f "$file"
+  return 1
 }
 
 certs::_acme_off() {
@@ -237,16 +260,37 @@ exit "\$rc"
 EOF
 }
 
+# Same steps as certs::_acme_on, including the wait for the reload to take effect.
 certs::_pre_hook() {
   cat <<EOF
 #!/bin/sh
 # cdn-deploy, CERT_MODE=http-01: opens :80 for the challenges before certbot renews.
+close() {
+  rm -f $CERTS_ACME_LINK
+  nginx -s reload
+  exit 1
+}
 ln -sfn $CERTS_ACME_SITE $CERTS_ACME_LINK
-if nginx -t -q; then
-  exec nginx -s reload
+if ! nginx -t -q; then
+  rm -f $CERTS_ACME_LINK
+  exit 1
 fi
-rm -f $CERTS_ACME_LINK
-exit 1
+nginx -s reload || close
+# The reload returns before the new config takes requests: wait for a probe file.
+probe=$CERTS_WEBROOT$CERTS_PROBE
+token="probe-\$\$"
+mkdir -p "\${probe%/*}"
+printf '%s' "\$token" >"\$probe"
+i=0
+while [ "\$(curl -s --max-time 2 -H 'Host: $VLESS_DOMAIN' http://127.0.0.1$CERTS_PROBE)" != "\$token" ]; do
+  i=\$((i + 1))
+  if [ "\$i" -ge 20 ]; then
+    rm -f "\$probe"
+    close
+  fi
+  sleep 0.5
+done
+rm -f "\$probe"
 EOF
 }
 
