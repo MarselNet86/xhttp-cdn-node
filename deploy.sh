@@ -7,6 +7,8 @@ set -Eeuo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib/common.sh"
 # shellcheck source=lib/prompt.sh
 source "$REPO_ROOT/lib/prompt.sh"
+# shellcheck source=lib/certs.sh
+source "$REPO_ROOT/lib/certs.sh"
 
 # set -e alone exits without a word; name the command that failed.
 trap 'log::error "unexpected failure (exit $?) at ${BASH_SOURCE[0]##*/}:$LINENO: $BASH_COMMAND"' ERR
@@ -17,14 +19,16 @@ readonly -a PACKAGES=(nginx certbot python3-certbot-dns-cloudflare curl jq opens
 
 # Steps in execution order: "<id> <function> [<module function it needs>]".
 # A step whose function does not exist yet is marked in the plan and stops a real run.
+# Certificates come before nginx, whose site loads them; sysctl comes before nginx too,
+# because somaxconn caps the listen backlog at the moment nginx opens its port.
 readonly -a STEPS=(
   "preflight deploy::preflight"
   "input prompt::collect"
   "config deploy::load_config"
   "packages deploy::packages pkg::install"
-  "sysctl sysctl::apply"
   "certs certs::issue"
   "renew-hook certs::install_renew_hook"
+  "sysctl sysctl::apply"
   "nginx nginx::render"
   "remnawave remnawave::emit"
   "validate validate::layers"
@@ -50,6 +54,9 @@ deploy::preflight() {
   require::root
   require::distro /etc/os-release
   log::info "OS: $OS_ID $OS_VERSION_ID"
+  if [[ -n "$SYSROOT" ]]; then
+    log::warn "CDN_DEPLOY_SYSROOT=$SYSROOT: system files go under it, meant for tests only"
+  fi
 }
 
 # .env.example supplies defaults for keys that a hand-edited .env lacks.
@@ -132,8 +139,9 @@ deploy::describe() {
         "$(deploy::show CERT_MODE)" "$(deploy::cert_domains)"
       ;;
     renew-hook)
-      printf 'write /etc/letsencrypt/renewal-hooks/deploy/cdn-deploy.sh: nginx reload, "%s"' \
-        "$(deploy::show NODE_RELOAD_CMD)"
+      printf 'certbot deploy hook: nginx reload, "%s" when %s renews%s; certbot.timer on' \
+        "$(deploy::show NODE_RELOAD_CMD)" "$(deploy::show HY2_DOMAIN)" \
+        "$([[ "${CERT_MODE:-}" == http-01 ]] && printf '; pre/post hooks open :80 for HTTP-01')"
       ;;
     nginx)
       printf 'templates/ into /etc/nginx/: :%s %s -> 127.0.0.1:%s; drop %s; nginx -t; reload' \
