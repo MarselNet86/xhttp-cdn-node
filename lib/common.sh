@@ -208,6 +208,8 @@ confirm() {
       printf '\n' >&2
       return "$default_rc"
     fi
+    # Without a terminal the answer is not echoed; end the line for the next message.
+    [[ -t 0 ]] || printf '\n' >&2
     answer="${answer//[[:space:]]/}"
     case "${answer,,}" in
       "") return "$default_rc" ;;
