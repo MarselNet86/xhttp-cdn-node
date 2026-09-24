@@ -68,11 +68,19 @@ if grep -qx "$name" "$STUB_DIR/certbot-fail" 2>/dev/null; then
 fi
 exec fake-cert "$name" 90 "$method"
 EOF
+  # Like nginx, prints a notice on a successful reload.
   stub nginx <<'EOF'
 echo "nginx $*" >>"$STUB_DIR/calls"
 if [ "$1" = -t ] && [ -e "$STUB_DIR/nginx-t-fail" ]; then
   echo "nginx: [emerg] the stub rejects the config" >&2
   exit 1
+fi
+if [ "$1" = -s ]; then
+  if [ -e "$STUB_DIR/nginx-reload-fail" ]; then
+    echo "nginx: [error] invalid PID number" >&2
+    exit 1
+  fi
+  echo "nginx: [notice] signal process started" >&2
 fi
 EOF
   stub systemctl <<'EOF'
@@ -234,6 +242,16 @@ snapshot() {
   [ "$(calls '^certbot')" -eq 0 ]
 }
 
+@test "http-01 keeps :80 closed when nginx fails to reload" {
+  CERT_MODE=http-01
+  touch "$TMP/nginx-reload-fail"
+  run certs::issue
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"nginx -s reload failed: nginx: [error] invalid PID number"* ]]
+  [ ! -e "$TMP/root/etc/nginx/sites-enabled/cdn-deploy-acme.conf" ]
+  [ "$(calls '^certbot')" -eq 0 ]
+}
+
 @test "http-01 closes :80 again when certbot fails" {
   CERT_MODE=http-01
   echo vless.example.com >"$TMP/certbot-fail"
@@ -329,6 +347,19 @@ snapshot() {
   touch "$TMP/docker-fail"
   run env RENEWED_DOMAINS=hy2.example.com "$hook"
   [ "$status" -eq 1 ]
+}
+
+# Only the deploy hook runs here: the pre and post hooks edit the real /etc/nginx.
+@test "the deploy hook stays silent while nginx reloads fine and reports a failure" {
+  local hook="$LE/renewal-hooks/deploy/cdn-deploy.sh"
+  certs::install_renew_hook 2>/dev/null
+  run env RENEWED_DOMAINS=vless.example.com "$hook"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  touch "$TMP/nginx-reload-fail"
+  run env RENEWED_DOMAINS=vless.example.com "$hook"
+  [ "$status" -eq 1 ]
+  [ "$output" = "nginx: [error] invalid PID number" ]
 }
 
 @test "the deploy hook runs a command with quotes, # and spaces as written" {
