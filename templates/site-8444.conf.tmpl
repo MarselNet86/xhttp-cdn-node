@@ -1,0 +1,61 @@
+# cdn-deploy origin for the CDN edge (tech.md §3, §6): TLS ends here, xray gets plain
+# HTTP on 127.0.0.1. Rendered by lib/nginx.sh from templates/site-8444.conf.tmpl: edits
+# on the server are overwritten by the next ./deploy.sh.
+
+upstream xray_xhttp {
+    server 127.0.0.1:${XHTTP_PORT};
+    keepalive 512;
+    keepalive_requests 100000;
+    keepalive_timeout 300s;
+}
+
+server {
+    listen ${NGINX_TLS_PORT} ssl backlog=4096;
+    server_name ${CDN_DOMAIN} ${VLESS_DOMAIN};
+
+    ssl_certificate ${ORIGIN_CERT_DIR}/fullchain.pem;
+    ssl_certificate_key ${ORIGIN_CERT_DIR}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:cdn_origin:10m;
+    ssl_session_timeout 1h;
+
+    # packet-up sends a request per packet over connections the edge keeps open, and
+    # nginx before 1.19.10 closes a client connection after 100 requests.
+    keepalive_requests 100000;
+    keepalive_timeout 300s;
+    # xhttp padding rides in headers; xray itself accepts up to serverMaxHeaderBytes 32768.
+    large_client_header_buffers 4 32k;
+
+    # Diagnostic endpoint: 204 here and via the CDN splits edge problems from xhttp ones.
+    location = /cdn-check {
+        add_header X-CDN-Origin ok always;
+        add_header X-Origin-Method $request_method always;
+        add_header Cache-Control no-store always;
+        return 204;
+    }
+
+    location ^~ ${XHTTP_PATH} {
+        proxy_pass http://xray_xhttp;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        # xray checks Host against the inbound host, CDN_DOMAIN, whatever the edge sent.
+        proxy_set_header Host ${CDN_DOMAIN};
+        # xray takes the client address from the first X-Forwarded-For entry.
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        client_max_body_size 0;
+        # Timeweb caches by default; a cached tunnel reply breaks the session.
+        add_header Cache-Control "no-store, no-transform" always;
+        add_header X-Accel-Buffering no always;
+        # One request per packet: logging them would flood the disk.
+        access_log off;
+    }
+
+    location / {
+        return 403;
+    }
+}
