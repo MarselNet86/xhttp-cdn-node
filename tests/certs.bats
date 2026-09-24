@@ -234,7 +234,7 @@ snapshot() {
   CERT_MODE=http-01
   run certs::issue
   [ "$status" -eq 0 ]
-  [ "$(calls "^curl .*-H Host: vless.example.com http://127.0.0.1/.well-known/acme-challenge/cdn-deploy-probe")" -eq 1 ]
+  [ "$(calls "^curl .*-H Host: vless.example.com http://127.0.0.1/.well-known/acme-challenge/cdn-deploy-probe")" -eq 10 ]
   [ ! -e "$TMP/root/var/www/cdn-deploy-acme/.well-known/acme-challenge/cdn-deploy-probe" ]
 }
 
