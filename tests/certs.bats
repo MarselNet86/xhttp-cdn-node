@@ -82,6 +82,12 @@ case "$1" in
   is-enabled) [ -e "$STUB_DIR/timer-enabled" ] ;;
 esac
 EOF
+  # Serves the readiness probe the way nginx would, unless curl-silent is set.
+  stub curl <<'EOF'
+echo "curl $*" >>"$STUB_DIR/calls"
+[ ! -e "$STUB_DIR/curl-silent" ] || exit 7
+cat "$CDN_DEPLOY_SYSROOT/var/www/cdn-deploy-acme/.well-known/acme-challenge/cdn-deploy-probe" 2>/dev/null
+EOF
   # Brackets keep argument boundaries visible in the log.
   stub docker <<'EOF'
 {
@@ -207,6 +213,24 @@ snapshot() {
   [ "$status" -eq 6 ]
   [ ! -e "$TMP/root/etc/nginx/sites-enabled/cdn-deploy-acme.conf" ]
   [ "$(calls 'nginx -s reload')" -eq 0 ]
+  [ "$(calls '^certbot')" -eq 0 ]
+}
+
+@test "http-01 waits for the ACME server to answer after the reload" {
+  CERT_MODE=http-01
+  run certs::issue
+  [ "$status" -eq 0 ]
+  [ "$(calls "^curl .*-H Host: vless.example.com http://127.0.0.1/.well-known/acme-challenge/cdn-deploy-probe")" -eq 1 ]
+  [ ! -e "$TMP/root/var/www/cdn-deploy-acme/.well-known/acme-challenge/cdn-deploy-probe" ]
+}
+
+@test "http-01 gives up and closes :80 when the ACME server never answers" {
+  CERT_MODE=http-01
+  touch "$TMP/curl-silent"
+  run certs::issue
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"does not answer on 127.0.0.1:80"* ]]
+  [ ! -e "$TMP/root/etc/nginx/sites-enabled/cdn-deploy-acme.conf" ]
   [ "$(calls '^certbot')" -eq 0 ]
 }
 
@@ -338,6 +362,7 @@ snapshot() {
   sh -n "$post"
   [ -n "$(find "$pre" "$post" -perm 755 | sed -n 2p)" ]
   grep -qF 'ln -sfn /etc/nginx/sites-available/cdn-deploy-acme.conf /etc/nginx/sites-enabled/cdn-deploy-acme.conf' "$pre"
+  grep -qF "curl -s --max-time 2 -H 'Host: vless.example.com' http://127.0.0.1/.well-known/acme-challenge/cdn-deploy-probe" "$pre"
   grep -qF 'rm -f /etc/nginx/sites-enabled/cdn-deploy-acme.conf' "$post"
   CERT_MODE=dns-cloudflare
   run certs::install_renew_hook
