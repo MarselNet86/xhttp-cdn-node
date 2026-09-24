@@ -4,8 +4,16 @@
 
 set -euo pipefail
 
+# deploy.sh may source this module more than once; readonly constants must not be redefined.
+if [[ -n "${_CDN_CERTS_LOADED:-}" ]]; then
+  return 0
+fi
+_CDN_CERTS_LOADED=1
+
 # shellcheck source=common.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
+# shellcheck source=nginx.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/nginx.sh"
 
 # Paths as the host sees them; files are created under $SYSROOT, which only tests set.
 readonly CERTS_LE_DIR=/etc/letsencrypt
@@ -90,14 +98,13 @@ certs::install_renew_hook() {
 
 # --- issuance ---------------------------------------------------------------------------
 
-# VLESS and Hysteria2 always get a certificate. CDN_DOMAIN gets one only when asked and
-# never under http-01, which cannot validate a CNAME to the CDN (tech.md §4).
+# VLESS and Hysteria2 always get a certificate, CDN_DOMAIN only per env::cdn_has_cert.
 certs::_domains() {
   printf '%s\n' "$VLESS_DOMAIN"
   if [[ "$HY2_DOMAIN" != "$VLESS_DOMAIN" ]]; then
     printf '%s\n' "$HY2_DOMAIN"
   fi
-  if [[ "$CERT_MODE" == dns-cloudflare && "${ISSUE_CDN_ORIGIN_CERT:-true}" == true ]]; then
+  if env::cdn_has_cert; then
     printf '%s\n' "$CDN_DOMAIN"
   fi
 }
@@ -191,7 +198,7 @@ certs::_acme_on() {
     rm -f "$SYSROOT$CERTS_ACME_LINK"
     log::die "$EXIT_CERTS" "nginx rejects the config with the ACME server: see nginx -t above"
   fi
-  if ! certs::_nginx_reload; then
+  if ! nginx::reload; then
     rm -f "$SYSROOT$CERTS_ACME_LINK"
     log::die "$EXIT_CERTS" "nginx did not take the ACME server; :80 stays closed"
   fi
@@ -223,7 +230,7 @@ certs::_wait_for_acme() {
 
 certs::_acme_off() {
   rm -f "$SYSROOT$CERTS_ACME_LINK"
-  certs::_nginx_reload || log::die "$EXIT_CERTS" "nginx still serves the ACME server on :80: fix nginx and reload it"
+  nginx::reload || log::die "$EXIT_CERTS" "nginx still serves the ACME server on :80: fix nginx and reload it"
 }
 
 certs::_remove_acme_site() {
@@ -233,22 +240,7 @@ certs::_remove_acme_site() {
   fi
   certs::_remove "$SYSROOT$CERTS_ACME_LINK" "$SYSROOT$CERTS_ACME_SITE"
   if ((was_enabled)); then
-    certs::_nginx_reload || log::die "$EXIT_CERTS" "nginx still serves the ACME server on :80: fix nginx and reload it"
-  fi
-}
-
-# nginx -s reload prints a notice even on success; its output shows only on failure.
-certs::_nginx_reload() {
-  local out
-  if ! systemctl is-active --quiet nginx; then
-    log::info "nginx is not running: starting it"
-    systemctl start nginx >&2 && return 0
-    log::error "cannot start nginx: see systemctl status nginx"
-    return 1
-  fi
-  if ! out="$(nginx -s reload 2>&1)"; then
-    log::error "nginx -s reload failed: $out"
-    return 1
+    nginx::reload || log::die "$EXIT_CERTS" "nginx still serves the ACME server on :80: fix nginx and reload it"
   fi
 }
 
