@@ -409,3 +409,17 @@ STUB
   run env CDN_DEPLOY_SYSROOT=/scratch bash -c "source \"$lib\" && printf %s \"\$SYSROOT\""
   [ "$output" = /scratch ]
 }
+
+@test "env::cdn_has_cert holds only under dns-cloudflare with ISSUE_CDN_ORIGIN_CERT=true" {
+  CERT_MODE=dns-cloudflare
+  ISSUE_CDN_ORIGIN_CERT=true
+  run env::cdn_has_cert
+  [ "$status" -eq 0 ]
+  ISSUE_CDN_ORIGIN_CERT=false
+  run env::cdn_has_cert
+  [ "$status" -eq 1 ]
+  CERT_MODE=http-01
+  ISSUE_CDN_ORIGIN_CERT=true
+  run env::cdn_has_cert
+  [ "$status" -eq 1 ]
+}
