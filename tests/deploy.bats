@@ -143,3 +143,9 @@ EOF
   [ ! -e "$REPO/.env" ]
   [ ! -e "$TMP/calls" ]
 }
+
+@test "the input step is wired to prompt::collect" {
+  deploy --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$(step_line input)" != *"not implemented"* ]]
+}
