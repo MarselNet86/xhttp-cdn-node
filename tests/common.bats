@@ -324,3 +324,88 @@ EOF
     }
   done
 }
+
+# dpkg-query and apt-get stubs: $TMP/installed lists the installed packages.
+pkg_stubs() {
+  mkdir -p "$TMP/bin"
+  cat >"$TMP/bin/dpkg-query" <<STUB
+#!/bin/sh
+for last; do :; done
+if grep -qx "\$last" "$TMP/installed" 2>/dev/null; then
+  printf 'install ok installed'
+fi
+STUB
+  cat >"$TMP/bin/apt-get" <<STUB
+#!/bin/sh
+echo "apt-get \$*" >>"$TMP/calls"
+[ ! -e "$TMP/apt-fail" ]
+STUB
+  chmod +x "$TMP/bin/dpkg-query" "$TMP/bin/apt-get"
+  PATH="$TMP/bin:$PATH"
+}
+
+@test "pkg::install refreshes the index once and installs only the missing packages" {
+  pkg_stubs
+  printf '%s\n' curl jq >"$TMP/installed"
+  PKG_INSTALL="env DEBIAN_FRONTEND=noninteractive apt-get install -y"
+  run pkg::install curl nginx jq certbot
+  [ "$status" -eq 0 ]
+  [ "$(tr '\n' '|' <"$TMP/calls")" = "apt-get -o DPkg::Lock::Timeout=300 update -qq|apt-get install -y nginx certbot|" ]
+}
+
+@test "pkg::install touches nothing when every package is installed" {
+  pkg_stubs
+  printf '%s\n' curl jq >"$TMP/installed"
+  PKG_INSTALL="apt-get install -y"
+  run pkg::install curl jq
+  [ "$status" -eq 0 ]
+  [ ! -e "$TMP/calls" ]
+  [[ "$output" == *"packages already installed: curl jq"* ]]
+}
+
+@test "pkg::install exits 3 when apt fails and 1 before require::distro" {
+  pkg_stubs
+  touch "$TMP/apt-fail"
+  PKG_INSTALL="apt-get install -y"
+  run pkg::install nginx
+  [ "$status" -eq 3 ]
+  unset PKG_INSTALL
+  run pkg::install nginx
+  [ "$status" -eq 1 ]
+}
+
+@test "fs::write writes the content, a final newline and the mode atomically" {
+  local leftovers
+  fs::write "$TMP/f" 640 hello 2>/dev/null
+  [ "$FS_CHANGED" -eq 1 ]
+  [ "$(cat "$TMP/f")" = hello ]
+  [ "$(wc -c <"$TMP/f")" -eq 6 ]
+  [ -n "$(find "$TMP/f" -perm 640)" ]
+  leftovers=("$TMP"/f.*)
+  [ "${leftovers[*]}" = "$TMP/f.*" ]
+}
+
+@test "fs::write leaves an identical file alone apart from its mode" {
+  fs::write "$TMP/f" 600 hello 2>/dev/null
+  touch -d 2020-01-01 "$TMP/f"
+  chmod 644 "$TMP/f"
+  fs::write "$TMP/f" 600 hello 2>/dev/null
+  [ "$FS_CHANGED" -eq 0 ]
+  [ -n "$(find "$TMP/f" -perm 600)" ]
+  [ "$(date -r "$TMP/f" +%Y)" = 2020 ]
+  fs::write "$TMP/f" 600 bye 2>/dev/null
+  [ "$FS_CHANGED" -eq 1 ]
+  [ "$(cat "$TMP/f")" = bye ]
+}
+
+@test "fs::write exits 1 when the directory is missing" {
+  run fs::write "$TMP/missing/f" 644 x
+  [ "$status" -eq 1 ]
+}
+
+@test "SYSROOT follows CDN_DEPLOY_SYSROOT and stays empty without it" {
+  local lib="$BATS_TEST_DIRNAME/../lib/common.sh"
+  [ -z "$SYSROOT" ]
+  run env CDN_DEPLOY_SYSROOT=/scratch bash -c "source \"$lib\" && printf %s \"\$SYSROOT\""
+  [ "$output" = /scratch ]
+}
