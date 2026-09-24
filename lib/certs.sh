@@ -191,7 +191,10 @@ certs::_acme_on() {
     rm -f "$SYSROOT$CERTS_ACME_LINK"
     log::die "$EXIT_CERTS" "nginx rejects the config with the ACME server: see nginx -t above"
   fi
-  certs::_nginx_reload
+  if ! certs::_nginx_reload; then
+    rm -f "$SYSROOT$CERTS_ACME_LINK"
+    log::die "$EXIT_CERTS" "nginx did not take the ACME server; :80 stays closed"
+  fi
   if ! certs::_wait_for_acme; then
     certs::_acme_off
     log::die "$EXIT_CERTS" "the ACME server does not answer on 127.0.0.1:80: check that nothing else holds port 80"
@@ -218,7 +221,7 @@ certs::_wait_for_acme() {
 
 certs::_acme_off() {
   rm -f "$SYSROOT$CERTS_ACME_LINK"
-  certs::_nginx_reload
+  certs::_nginx_reload || log::die "$EXIT_CERTS" "nginx still serves the ACME server on :80: fix nginx and reload it"
 }
 
 certs::_remove_acme_site() {
@@ -228,16 +231,22 @@ certs::_remove_acme_site() {
   fi
   certs::_remove "$SYSROOT$CERTS_ACME_LINK" "$SYSROOT$CERTS_ACME_SITE"
   if ((was_enabled)); then
-    certs::_nginx_reload
+    certs::_nginx_reload || log::die "$EXIT_CERTS" "nginx still serves the ACME server on :80: fix nginx and reload it"
   fi
 }
 
+# nginx -s reload prints a notice even on success; its output shows only on failure.
 certs::_nginx_reload() {
-  if systemctl is-active --quiet nginx; then
-    nginx -s reload
-  else
+  local out
+  if ! systemctl is-active --quiet nginx; then
     log::info "nginx is not running: starting it"
-    systemctl start nginx
+    systemctl start nginx >&2 && return 0
+    log::error "cannot start nginx: see systemctl status nginx"
+    return 1
+  fi
+  if ! out="$(nginx -s reload 2>&1)"; then
+    log::error "nginx -s reload failed: $out"
+    return 1
   fi
 }
 
@@ -251,8 +260,9 @@ certs::_deploy_hook() {
 # cdn-deploy deploy hook (tech.md §5): certbot runs it after each renewed certificate.
 # Written by ./deploy.sh from .env: rerun it after changing HY2_DOMAIN or NODE_RELOAD_CMD.
 node_reload=$(certs::_sh_quote "$NODE_RELOAD_CMD")
+$(certs::_sh_reload)
 rc=0
-nginx -s reload || rc=1
+reload || rc=1
 case " \${RENEWED_DOMAINS:-} " in
 *" $HY2_DOMAIN "*) sh -c "\$node_reload" || rc=1 ;;
 esac
@@ -265,9 +275,10 @@ certs::_pre_hook() {
   cat <<EOF
 #!/bin/sh
 # cdn-deploy, CERT_MODE=http-01: opens :80 for the challenges before certbot renews.
+$(certs::_sh_reload)
 close() {
   rm -f $CERTS_ACME_LINK
-  nginx -s reload
+  reload
   exit 1
 }
 ln -sfn $CERTS_ACME_SITE $CERTS_ACME_LINK
@@ -275,7 +286,7 @@ if ! nginx -t -q; then
   rm -f $CERTS_ACME_LINK
   exit 1
 fi
-nginx -s reload || close
+reload || close
 # The reload returns before the new config takes requests: wait for a probe file.
 probe=$CERTS_WEBROOT$CERTS_PROBE
 token="probe-\$\$"
@@ -298,8 +309,22 @@ certs::_post_hook() {
   cat <<EOF
 #!/bin/sh
 # cdn-deploy, CERT_MODE=http-01: closes :80 again after certbot renews.
+$(certs::_sh_reload)
 rm -f $CERTS_ACME_LINK
-exec nginx -s reload
+reload
+EOF
+}
+
+# A reload() for the hook scripts. certbot logs any stderr of a hook as error output, and
+# nginx -s reload prints a notice even on success, so the output shows only on failure.
+certs::_sh_reload() {
+  cat <<'EOF'
+reload() {
+  out=$(nginx -s reload 2>&1) || {
+    printf '%s\n' "$out" >&2
+    return 1
+  }
+}
 EOF
 }
 
