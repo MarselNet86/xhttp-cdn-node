@@ -145,8 +145,8 @@ EOF
   [ ! -e "$TMP/calls" ]
 }
 
-@test "the input step is wired to prompt::collect" {
+@test "every step is wired to its module" {
   deploy --dry-run
   [ "$status" -eq 0 ]
-  [[ "$(step_line input)" != *"not implemented"* ]]
+  [[ "$output" != *"not implemented"* ]]
 }
