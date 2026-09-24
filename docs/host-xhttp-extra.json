@@ -1,0 +1,26 @@
+{
+  "xmux": {
+    "hKeepAlivePeriod": 15,
+    "hMaxReusableSecs": "1800-3000"
+  },
+  "seqKey": "page",
+  "headers": {},
+  "enableXmux": true,
+  "xPaddingKey": "_rupl",
+  "seqPlacement": "query",
+  "uplinkDataKey": "X-Data",
+  "xPaddingBytes": "50-200",
+  "sessionIDTable": "base36",
+  "xPaddingHeader": "X-Cache",
+  "xPaddingMethod": "tokenish",
+  "sessionIDLength": "8-12",
+  "uplinkChunkSize": 2048,
+  "uplinkHTTPMethod": "GET",
+  "xPaddingObfsMode": true,
+  "xPaddingPlacement": "header",
+  "scMaxBufferedPosts": 64,
+  "scMaxEachPostBytes": 60000,
+  "sessionIDPlacement": "query",
+  "uplinkDataPlacement": "body",
+  "serverMaxHeaderBytes": 32768
+}
