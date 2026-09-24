@@ -78,8 +78,35 @@ require::distro() {
   esac
   # The stack needs none of the recommended extras (checked on all three targets);
   # DEBIAN_FRONTEND keeps debconf from blocking on a question.
+  # The lock timeout waits out unattended-upgrades, busy on a freshly booted VPS.
   export OS_ID="$id" OS_VERSION_ID="$version"
-  export PKG_INSTALL="env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends"
+  export PKG_INSTALL="env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o DPkg::Lock::Timeout=300"
+}
+
+# --- packages ---------------------------------------------------------------------------
+
+# Installs the given apt packages that are missing, so a rerun changes nothing.
+# Runs after require::distro, which sets PKG_INSTALL.
+pkg::install() {
+  local pkg cmd missing=()
+  [[ -n "${PKG_INSTALL:-}" ]] || log::die "$EXIT_FAILURE" "pkg::install needs require::distro first"
+  for pkg in "$@"; do
+    # shellcheck disable=SC2016  # ${Status} is a dpkg-query field, not a shell variable
+    if [[ "$(dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null)" != "install ok installed" ]]; then
+      missing+=("$pkg")
+    fi
+  done
+  if ((${#missing[@]} == 0)); then
+    log::info "packages already installed: $*"
+    return 0
+  fi
+  log::info "installing packages: ${missing[*]}"
+  # A fresh cloud image ships a stale or empty package index.
+  apt-get -o DPkg::Lock::Timeout=300 update -qq >&2 ||
+    log::die "$EXIT_DEPS" "apt-get update failed: check the network and the apt sources"
+  read -ra cmd <<<"$PKG_INSTALL"
+  "${cmd[@]}" "${missing[@]}" >&2 ||
+    log::die "$EXIT_DEPS" "cannot install ${missing[*]}: see the apt output above"
 }
 
 # --- validators: return 0 or 1 and print nothing ----------------------------------------
