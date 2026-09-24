@@ -17,7 +17,7 @@ readonly SYSCTL_LIMITS=/etc/security/limits.d/99-cdn-nofile.conf
 readonly SYSCTL_NOFILE=65535
 
 sysctl::apply() {
-  local changed=0 dropin_changed=0
+  local changed=0 restart=0 backlog
   require::cmd sysctl systemctl
   env::require XHTTP_PORT NGINX_TLS_PORT
   mkdir -p "$SYSROOT${SYSCTL_CONF%/*}" "$SYSROOT${SYSCTL_NGINX_DROPIN%/*}" "$SYSROOT${SYSCTL_LIMITS%/*}"
@@ -28,22 +28,26 @@ sysctl::apply() {
 
   if ((changed)) || ! sysctl::_in_effect quiet; then
     log::info "applying kernel settings: sysctl --system"
+    backlog="$(sysctl -n net.core.somaxconn 2>/dev/null || true)"
     # Another file failing to apply is not ours to fix; the check below covers ours.
     sysctl --system >&2 || log::warn "sysctl --system reported errors, see above"
-    changed=1
+    # somaxconn caps the backlog when nginx opens a port, so only a changed one needs a
+    # restart. A kernel that refuses it would otherwise restart nginx on every run.
+    if [[ "$(sysctl -n net.core.somaxconn 2>/dev/null || true)" != "$backlog" ]]; then
+      restart=1
+    fi
     sysctl::_in_effect warn || true
   else
     log::info "kernel settings are in effect"
   fi
 
   fs::write "$SYSROOT$SYSCTL_NGINX_DROPIN" 644 "$(sysctl::_nginx_dropin)"
-  dropin_changed=$FS_CHANGED
-  fs::write "$SYSROOT$SYSCTL_LIMITS" 644 "$(sysctl::_limits)"
-  if ((dropin_changed)); then
+  if ((FS_CHANGED)); then
     systemctl daemon-reload >&2
+    restart=1
   fi
-  # A restart makes nginx open its ports under the new somaxconn and run with the new limit.
-  if ((dropin_changed || changed)) && systemctl is-active --quiet nginx; then
+  fs::write "$SYSROOT$SYSCTL_LIMITS" 644 "$(sysctl::_limits)"
+  if ((restart)) && systemctl is-active --quiet nginx; then
     log::info "restarting nginx for the new backlog and open-file limits"
     systemctl restart nginx >&2 || log::die "$EXIT_FAILURE" "nginx did not restart: see systemctl status nginx"
   fi
