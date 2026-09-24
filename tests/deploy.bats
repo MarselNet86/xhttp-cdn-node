@@ -57,7 +57,7 @@ step_line() {
   has_line '^ +XHTTP_PATH +/api/v2\.jpg/$'
   has_line '^ +NGINX_TLS_PORT +8444$'
   has_line '^ +CERT_MODE +dns-cloudflare$'
-  has_line 'nginx .*:8444 <CDN_DOMAIN> -> 127\.0\.0\.1:4443'
+  has_line 'nginx .*:8444 <CDN_DOMAIN> \(certificate of <CDN_DOMAIN>\) -> 127\.0\.0\.1:4443'
 }
 
 @test "--dry-run changes nothing" {
@@ -88,7 +88,7 @@ EOF
   has_line '^ +UUID +<hidden>$'
   has_line '^ +CF_API_TOKEN +<hidden>$'
   has_line 'certs .*vless\.example\.com hy2\.example\.com cdn\.example\.com'
-  has_line 'nginx .*:8444 cdn\.example\.com -> 127\.0\.0\.1:4450'
+  has_line 'nginx .*:8444 cdn\.example\.com \(certificate of cdn\.example\.com\) -> 127\.0\.0\.1:4450'
   [[ "$output $(cat "$TMP/stderr")" != *tok-7f3a9* ]]
   [[ "$output $(cat "$TMP/stderr")" != *3f1c2d4e* ]]
 }
@@ -106,6 +106,7 @@ EOF
       echo "$setting still plans a CDN certificate"
       return 1
     }
+    [[ "$(step_line nginx)" == *"(certificate of vless.example.com)"* ]]
   done
 }
 
