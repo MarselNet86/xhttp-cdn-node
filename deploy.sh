@@ -13,6 +13,10 @@ source "$REPO_ROOT/lib/certs.sh"
 source "$REPO_ROOT/lib/nginx.sh"
 # shellcheck source=lib/sysctl.sh
 source "$REPO_ROOT/lib/sysctl.sh"
+# shellcheck source=lib/remnawave.sh
+source "$REPO_ROOT/lib/remnawave.sh"
+# shellcheck source=lib/validate.sh
+source "$REPO_ROOT/lib/validate.sh"
 
 # set -e alone exits without a word; name the command that failed.
 trap 'log::error "unexpected failure (exit $?) at ${BASH_SOURCE[0]##*/}:$LINENO: $BASH_COMMAND"' ERR
@@ -156,7 +160,7 @@ deploy::describe() {
       ;;
     remnawave) printf 'render out/remnawave/ (xhttp inbound, host extra) to paste into the panel' ;;
     validate)
-      printf 'xray 127.0.0.1:%s; origin :%s /cdn-check and %s; CDN %s /cdn-check' \
+      printf 'layers: xray 127.0.0.1:%s; origin :%s /cdn-check 204; %stest 400 with padding; CDN %s /cdn-check 204' \
         "$xhttp_port" "$tls_port" "$(deploy::show XHTTP_PATH)" "$cdn"
       ;;
   esac
