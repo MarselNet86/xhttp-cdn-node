@@ -81,3 +81,139 @@ require::distro() {
   export OS_ID="$id" OS_VERSION_ID="$version"
   export PKG_INSTALL="env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends"
 }
+
+# --- validators: return 0 or 1 and print nothing ----------------------------------------
+# Each checks the shape with a regex before any (( )): arithmetic evaluates a variable's
+# contents as code, so unchecked input there is an injection.
+
+# A name usable for a certificate and nginx server_name: two or more labels, an
+# alphabetic or punycode TLD, no trailing dot, wildcard or underscore.
+is::fqdn() {
+  local s="${1-}"
+  local label='[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
+  local re='^('"$label"'\.)+([A-Za-z]{2,63}|xn--[A-Za-z0-9-]{1,59})$'
+  ((${#s} <= 253)) && [[ "$s" =~ $re ]]
+}
+
+# Dotted quad without leading zeros: some parsers read 010 as octal.
+is::ipv4() {
+  local s="${1-}" octet
+  [[ "$s" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  for octet in "${BASH_REMATCH[@]:1}"; do
+    [[ "$octet" == 0 || "$octet" != 0* ]] || return 1
+    ((octet <= 255)) || return 1
+  done
+}
+
+is::port() {
+  local s="${1-}"
+  [[ "$s" =~ ^[1-9][0-9]{0,4}$ ]] || return 1
+  ((s <= 65535))
+}
+
+# --- .env -----------------------------------------------------------------------------
+
+# Contract keys (tech.md §4) in prompt order. env::load accepts no others.
+readonly -a ENV_KEYS=(
+  VLESS_DOMAIN HY2_DOMAIN CDN_DOMAIN ORIGIN_IP XHTTP_PORT XHTTP_PATH NGINX_TLS_PORT
+  UUID CERT_MODE CF_API_TOKEN LE_EMAIL NODE_RELOAD_CMD ISSUE_CDN_ORIGIN_CERT
+)
+# Values that grant access to the DNS zone or the node: never print them.
+readonly -a ENV_SECRET_KEYS=(CF_API_TOKEN UUID)
+
+env::is_secret() { env::_contains "$1" "${ENV_SECRET_KEYS[@]}"; }
+
+# Loads KEY=VALUE lines into exported variables (envsubst reads the environment)
+# without executing the file. Values are literal: one pair of matching quotes is
+# stripped, and in an unquoted value a # at the start or after a space opens a comment.
+# Unknown keys are skipped with a warning, so a stray PATH= or a typo takes no effect.
+env::load() {
+  local file="$1" line key value n=0 secrets=0
+  local re_skip='^[[:space:]]*(#|$)'
+  local re_pair='^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*(.*)$'
+  [[ -f "$file" && -r "$file" ]] ||
+    log::die "$EXIT_INPUT" "cannot read $file: run ./deploy.sh to create it"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    n=$((n + 1))
+    line="${line%$'\r'}"
+    [[ "$line" =~ $re_skip ]] && continue
+    # The line itself is never echoed: it may carry a secret.
+    [[ "$line" =~ $re_pair ]] || log::die "$EXIT_INPUT" "$file:$n: expected KEY=VALUE"
+    key="${BASH_REMATCH[2]}"
+    value="${BASH_REMATCH[3]}"
+    if ! env::_contains "$key" "${ENV_KEYS[@]}"; then
+      log::warn "$file:$n: unknown key $key ignored, see .env.example"
+      continue
+    fi
+    value="$(env::_literal "$value")" ||
+      log::die "$EXIT_INPUT" "$file:$n: unbalanced quotes in the value of $key"
+    printf -v "$key" '%s' "$value"
+    export "${key?}"
+    if [[ -n "$value" ]] && env::is_secret "$key"; then
+      secrets=1
+    fi
+  done <"$file"
+  if ((secrets)) &&
+    [[ -n "$(find "$file" -maxdepth 0 \( -perm -g=r -o -perm -o=r \) 2>/dev/null)" ]]; then
+    log::warn "$file holds secrets and is readable by other users: run chmod 600 $file"
+  fi
+}
+
+env::require() {
+  local var missing=()
+  for var in "$@"; do
+    [[ -n "${!var:-}" ]] || missing+=("$var")
+  done
+  ((${#missing[@]} == 0)) ||
+    log::die "$EXIT_INPUT" "required settings are empty: ${missing[*]}. Rerun ./deploy.sh to set them"
+}
+
+# Prints the literal value of a raw .env value; fails on unbalanced quotes.
+env::_literal() {
+  local raw="$1"
+  local dq='^"([^"]*)"[[:space:]]*(#.*)?$' sq="^'([^']*)'[[:space:]]*(#.*)?\$"
+  if [[ "$raw" =~ $dq || "$raw" =~ $sq ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  elif [[ "$raw" == [\"\']* ]]; then
+    return 1
+  else
+    raw="${raw%%[[:space:]]#*}"
+    [[ "$raw" == \#* ]] && raw=""
+    printf '%s' "${raw%"${raw##*[![:space:]]}"}"
+  fi
+}
+
+env::_contains() {
+  local needle="$1" item
+  shift
+  for item in "$@"; do
+    [[ "$item" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+# --- interaction ------------------------------------------------------------------------
+
+# Asks a yes/no question on stderr and reads the answer from stdin. An empty answer or
+# EOF takes the default: no, unless the second argument is y.
+confirm() {
+  local prompt="$1" answer default_rc=1 hint='[y/N]'
+  if [[ "${2:-n}" == y ]]; then
+    default_rc=0
+    hint='[Y/n]'
+  fi
+  while true; do
+    printf '%s %s ' "$prompt" "$hint" >&2
+    if ! IFS= read -r answer && [[ -z "$answer" ]]; then
+      printf '\n' >&2
+      return "$default_rc"
+    fi
+    answer="${answer//[[:space:]]/}"
+    case "${answer,,}" in
+      "") return "$default_rc" ;;
+      y | yes) return 0 ;;
+      n | no) return 1 ;;
+      *) log::warn "answer y or n" ;;
+    esac
+  done
+}
