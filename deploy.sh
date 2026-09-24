@@ -21,9 +21,10 @@ source "$REPO_ROOT/lib/validate.sh"
 # set -e alone exits without a word; name the command that failed.
 trap 'log::error "unexpected failure (exit $?) at ${BASH_SOURCE[0]##*/}:$LINENO: $BASH_COMMAND"' ERR
 
-# System packages the stack runs on (tech.md §2).
+# System packages the stack runs on (tech.md §2). procps brings sysctl: minimal Debian
+# images lack it.
 readonly -a PACKAGES=(nginx certbot python3-certbot-dns-cloudflare curl jq openssl coreutils
-  gettext-base)
+  gettext-base procps)
 
 # Steps in execution order: "<id> <function> [<module function it needs>]".
 # A step whose function does not exist yet is marked in the plan and stops a real run.

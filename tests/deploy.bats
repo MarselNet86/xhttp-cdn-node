@@ -145,6 +145,27 @@ EOF
   [ ! -e "$TMP/calls" ]
 }
 
+@test "the packages step installs every command a module requires, beyond the base system" {
+  local cmd pkg plan missing=""
+  local -A from=([sysctl]=procps [systemctl]=base [certbot]=certbot [openssl]=openssl
+    [nginx]=nginx [envsubst]=gettext-base [curl]=curl [jq]=jq)
+  deploy --dry-run
+  plan="$(printf '%s\n' "$output" | sed -nE 's/.* packages +install missing: //p')"
+  [ -n "$plan" ]
+  for cmd in $(grep -ho 'require::cmd [a-z0-9 -]*' "$REPO"/lib/*.sh | cut -d' ' -f2- | tr ' ' '\n' | sort -u); do
+    pkg="${from[$cmd]:-}"
+    [ -n "$pkg" ] || {
+      echo "no package known for $cmd: add it to the table"
+      return 1
+    }
+    [[ "$pkg" == base || " $plan " == *" $pkg "* ]] || missing+=" $cmd ($pkg)"
+  done
+  [ -z "$missing" ] || {
+    echo "not installed:$missing"
+    return 1
+  }
+}
+
 @test "every step is wired to its module" {
   deploy --dry-run
   [ "$status" -eq 0 ]
