@@ -1,0 +1,151 @@
+# shellcheck shell=bash
+# Post-install check from the bottom up (tech.md §5): xray on the loopback, origin nginx,
+# the xhttp path through nginx, then the CDN edge the way clients reach it. Stops at the
+# first broken layer with exit 8 and says what to fix there.
+
+set -euo pipefail
+
+# shellcheck source=common.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
+
+validate::layers() {
+  require::cmd curl jq openssl
+  env::require CDN_DOMAIN XHTTP_PORT XHTTP_PATH NGINX_TLS_PORT ORIGIN_IP
+  validate::_origin_ip
+  validate::_xray
+  validate::_origin
+  validate::_xhttp
+  validate::_cdn
+  log::info "all layers pass: xray, origin nginx, xhttp path, CDN edge"
+}
+
+# --- layers -----------------------------------------------------------------------------
+
+# Layer 1: the inbound that the panel pushed listens on the loopback.
+validate::_xray() {
+  local addrs
+  if ! validate::_listening "$XHTTP_PORT"; then
+    validate::_fail 1 xray "nothing listens on 127.0.0.1:$XHTTP_PORT. Paste out/remnawave/inbound-xhttp-cdn.json into the panel, let the node take it, rerun ./deploy.sh"
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    addrs="$(ss -Hltn "sport = :$XHTTP_PORT" 2>/dev/null | awk '{print $4}' || true)"
+    if [[ -n "$addrs" ]] && grep -qvE '^127\.0\.0\.1:' <<<"$addrs"; then
+      log::warn "port $XHTTP_PORT listens beyond the loopback ($(paste -sd' ' <<<"$addrs")): set listen 127.0.0.1 in the inbound, TLS ends on nginx"
+    fi
+  fi
+  log::info "layer 1 (xray): 127.0.0.1:$XHTTP_PORT accepts connections"
+}
+
+# Layer 2: origin nginx answers /cdn-check with 204 and its marker header.
+validate::_origin() {
+  local headers
+  headers="$(validate::_origin_request /cdn-check)" ||
+    validate::_fail 2 "origin nginx" "no answer on 127.0.0.1:$NGINX_TLS_PORT: see systemctl status nginx"
+  if [[ "$(validate::_status "$headers")" != 204 ]] || ! validate::_has_header "$headers" X-CDN-Origin; then
+    validate::_fail 2 "origin nginx" "/cdn-check gave $(validate::_status "$headers") without X-CDN-Origin, not 204: nginx does not serve the cdn-deploy site, rerun ./deploy.sh"
+  fi
+  log::info "layer 2 (origin nginx): /cdn-check on :$NGINX_TLS_PORT gives 204"
+}
+
+# Layer 3: the xhttp path reaches xray. A request without a session gets 400 carrying the
+# padding header of the inbound.
+validate::_xhttp() {
+  local inbound="$REPO_ROOT/out/remnawave/inbound-xhttp-cdn.json" header headers status
+  header="$(jq -r '.streamSettings.xhttpSettings.extra.xPaddingHeader // empty' "$inbound" 2>/dev/null || true)"
+  [[ -n "$header" ]] || validate::_fail 3 "xhttp path" "no xPaddingHeader in $inbound: rerun ./deploy.sh"
+  headers="$(validate::_origin_request "${XHTTP_PATH}test")" ||
+    validate::_fail 3 "xhttp path" "no answer from nginx for ${XHTTP_PATH}test"
+  status="$(validate::_status "$headers")"
+  case "$status" in
+    400)
+      validate::_has_header "$headers" "$header" ||
+        validate::_fail 3 "xhttp path" "xray answered 400 without the $header padding header: the inbound in the panel differs from out/remnawave/inbound-xhttp-cdn.json"
+      ;;
+    404) validate::_fail 3 "xhttp path" "xray answered 404: XHTTP_PATH ($XHTTP_PATH) or the inbound host ($CDN_DOMAIN) differs from the panel" ;;
+    502 | 504) validate::_fail 3 "xhttp path" "nginx cannot reach xray on 127.0.0.1:$XHTTP_PORT ($status)" ;;
+    *) validate::_fail 3 "xhttp path" "${XHTTP_PATH}test gave $status, not 400 with the $header padding header" ;;
+  esac
+  log::info "layer 3 (xhttp path): xray answers ${XHTTP_PATH} through nginx with 400 and $header"
+}
+
+# Layer 4: the CDN edge, as clients see it. curl checks the edge certificate against
+# CDN_DOMAIN, the query defeats caches, and the marker header proves the origin answered.
+validate::_cdn() {
+  local headers rc=0 status
+  headers="$(validate::_request "https://$CDN_DOMAIN/cdn-check?nocache=$RANDOM$RANDOM")" || rc=$?
+  case "$rc" in
+    0) ;;
+    6) validate::_fail 4 "CDN edge" "$CDN_DOMAIN does not resolve: add the CNAME from the CDN resource to DNS" ;;
+    7 | 28) validate::_fail 4 "CDN edge" "no connection to $CDN_DOMAIN:443: check the CNAME and that the CDN resource is active" ;;
+    35) validate::_fail 4 "CDN edge" "TLS handshake with $CDN_DOMAIN failed: the CDN has no certificate for it yet" ;;
+    60) validate::_fail 4 "CDN edge" "the edge presents a certificate that does not cover $CDN_DOMAIN ($(validate::_edge_cert)): attach a certificate for $CDN_DOMAIN to the CDN resource, the change takes up to 30 minutes" ;;
+    *) validate::_fail 4 "CDN edge" "curl failed with exit $rc on https://$CDN_DOMAIN/cdn-check" ;;
+  esac
+  status="$(validate::_status "$headers")"
+  case "$status" in
+    204)
+      validate::_has_header "$headers" X-CDN-Origin ||
+        validate::_fail 4 "CDN edge" "204 without X-CDN-Origin: the answer did not come from this origin, check the resource's origin and caching"
+      ;;
+    451) validate::_fail 4 "CDN edge" "451: the CDN blocks $CDN_DOMAIN for legal reasons. A config change will not help, move to a new domain" ;;
+    502 | 504) validate::_fail 4 "CDN edge" "$status: the CDN cannot reach the origin. The resource's origin must be $ORIGIN_IP:$NGINX_TLS_PORT over HTTPS, with the port open" ;;
+    503) validate::_fail 4 "CDN edge" "503: the CDN reports overload or a disabled resource" ;;
+    403) validate::_fail 4 "CDN edge" "403: the CDN refuses the request. Check that the resource is active and allows GET" ;;
+    *) validate::_fail 4 "CDN edge" "/cdn-check through the CDN gave $status, not 204" ;;
+  esac
+  log::info "layer 4 (CDN edge): https://$CDN_DOMAIN/cdn-check gives 204 from this origin"
+}
+
+# ORIGIN_IP is where the CDN resource sends traffic, so it should point at this host.
+validate::_origin_ip() {
+  local public
+  if hostname -I 2>/dev/null | tr ' ' '\n' | grep -qxF "$ORIGIN_IP"; then
+    return 0
+  fi
+  public="$(curl -4 -fsS --max-time 5 https://ifconfig.me/ip 2>/dev/null || true)"
+  if [[ "$public" != "$ORIGIN_IP" ]]; then
+    log::warn "ORIGIN_IP=$ORIGIN_IP is not an address of this host, whose public IPv4 is ${public:-unknown}: the CDN resource may send traffic elsewhere"
+  fi
+}
+
+# --- helpers ----------------------------------------------------------------------------
+
+validate::_fail() {
+  log::die "$EXIT_VALIDATE" "layer $1 ($2) failed: $3"
+}
+
+validate::_listening() {
+  timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/$1" 2>/dev/null
+}
+
+# Headers of a GET, CR stripped; returns curl's exit code.
+validate::_request() {
+  local out rc=0
+  out="$(curl -s -o /dev/null -D - --max-time 10 "$@")" || rc=$?
+  printf '%s' "${out//$'\r'/}"
+  return "$rc"
+}
+
+# Origin requests skip DNS and certificate checks: the origin certificate may name
+# VLESS_DOMAIN, and layer 4 covers what clients see.
+validate::_origin_request() {
+  validate::_request -k --resolve "$CDN_DOMAIN:$NGINX_TLS_PORT:127.0.0.1" \
+    "https://$CDN_DOMAIN:$NGINX_TLS_PORT$1"
+}
+
+validate::_status() {
+  local line
+  line="$(head -n 1 <<<"$1")"
+  line="${line#* }"
+  printf '%s' "${line%% *}"
+}
+
+validate::_has_header() {
+  grep -qi "^$2:" <<<"$1"
+}
+
+validate::_edge_cert() {
+  openssl s_client -connect "$CDN_DOMAIN:443" -servername "$CDN_DOMAIN" </dev/null 2>/dev/null |
+    openssl x509 -noout -subject -ext subjectAltName 2>/dev/null | tr -s '\n ' ' ' | sed 's/ $//' ||
+    echo "certificate unreadable"
+}
