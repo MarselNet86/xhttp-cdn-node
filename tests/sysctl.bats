@@ -204,3 +204,35 @@ calls() {
     }
   done
 }
+
+@test "a kernel that keeps refusing somaxconn does not restart nginx on every run" {
+  echo net.core.somaxconn >"$TMP/readonly"
+  run sysctl::apply
+  [ "$status" -eq 0 ]
+  : >"$TMP/calls"
+  run sysctl::apply
+  [ "$status" -eq 0 ]
+  [ "$(calls '^sysctl --system')" -eq 1 ]
+  [ "$(calls '^systemctl restart')" -eq 0 ]
+}
+
+@test "a somaxconn put back into effect restarts nginx" {
+  run sysctl::apply
+  [ "$status" -eq 0 ]
+  kernel net.core.somaxconn 4096
+  : >"$TMP/calls"
+  run sysctl::apply
+  [ "$status" -eq 0 ]
+  [ "$(calls '^systemctl restart nginx')" -eq 1 ]
+}
+
+@test "other settings put back into effect do not restart nginx" {
+  run sysctl::apply
+  [ "$status" -eq 0 ]
+  kernel net.ipv4.tcp_fin_timeout 60
+  : >"$TMP/calls"
+  run sysctl::apply
+  [ "$status" -eq 0 ]
+  [ "$(calls '^sysctl --system')" -eq 1 ]
+  [ "$(calls '^systemctl restart')" -eq 0 ]
+}
