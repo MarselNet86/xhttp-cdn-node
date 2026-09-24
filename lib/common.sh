@@ -174,6 +174,13 @@ readonly -a ENV_SECRET_KEYS=(CF_API_TOKEN UUID)
 
 env::is_secret() { env::_contains "$1" "${ENV_SECRET_KEYS[@]}"; }
 
+# CDN_DOMAIN gets its own origin certificate only under dns-cloudflare with
+# ISSUE_CDN_ORIGIN_CERT=true: http-01 cannot validate a CNAME to the CDN. Otherwise origin
+# nginx serves the VLESS_DOMAIN certificate (tech.md §4).
+env::cdn_has_cert() {
+  [[ "${CERT_MODE:-}" == dns-cloudflare && "${ISSUE_CDN_ORIGIN_CERT:-true}" == true ]]
+}
+
 # Loads KEY=VALUE lines into exported variables (envsubst reads the environment)
 # without executing the file. Values are literal: one pair of matching quotes is
 # stripped, and in an unquoted value a # at the start or after a space opens a comment.
