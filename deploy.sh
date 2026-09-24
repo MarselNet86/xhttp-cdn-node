@@ -55,7 +55,7 @@ deploy::load_config() {
   env::load "$ENV_EXAMPLE"
   env::load "$ENV_FILE"
   env::require VLESS_DOMAIN HY2_DOMAIN CDN_DOMAIN ORIGIN_IP
-  if [[ "$CERT_MODE" == dns-cloudflare ]]; then
+  if [[ "${CERT_MODE:-}" == dns-cloudflare ]]; then
     env::require CF_API_TOKEN
   fi
 }
