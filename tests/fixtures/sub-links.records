@@ -1,0 +1,7 @@
+vless-xhttp-tls|cdn.example.com|443|cdn.example.com|cdn.example.com|/api/v2.jpg/|uid=3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f&encryption=none&extra=%7B%22xPaddingHeader%22%3A%22X-Cache%22%2C%22xmux%22%3A%7B%22hKeepAlivePeriod%22%3A15%7D%7D&host=cdn.example.com&mode=packet-up&path=%2Fapi%2Fv2.jpg%2F&security=tls&sni=cdn.example.com&type=xhttp&fp=chrome|🇨🇭 CDN / Timeweb
+vless-tcp-reality|203.0.113.10|443|www.swiss.com|www.swiss.com||uid=3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f&encryption=none&flow=xtls-rprx-vision&fp=chrome&pbk=Jx5cZ4XH3ncnbvvS4Ov9kA0OmvpEr7X3SqJ3Hkdhc2c&security=reality&sid=6ba85179e30d4fc2&sni=www.swiss.com&type=tcp&headerType=none|Reality direct
+hysteria2|hy2.example.com|443|hy2.example.com|hy2.example.com||uid=s3cr3t%2Bpass&sni=hy2.example.com&insecure=0|Hysteria2
+hysteria2|2001:db8::10|8443|hy2.example.com|hy2.example.com||uid=s3cr3t&sni=hy2.example.com|IPv6 hy2
+trojan-ws-tls|ws.example.com|443|ws.example.com|ws.example.com|/ws|uid=trojan-pass&security=tls&type=ws&path=%2Fws&host=ws.example.com&sni=ws.example.com|Trojan WS
+shadowsocks-tcp-none|ss.example.com|8388|ss.example.com|ss.example.com||uid=ss-pass&method=aes-128-gcm|Shadowsocks AEAD
+vmess-ws-tls|vm.example.com|443|vm.example.com|vm.example.com|/vm|uid=5b0f5e6a-1c2d-4e3f-8a9b-0c1d2e3f4a5b&type=ws&security=tls&sni=vm.example.com|VMess ws

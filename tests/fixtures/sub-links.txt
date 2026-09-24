@@ -1,0 +1,9 @@
+vless://3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f@cdn.example.com:443?encryption=none&extra=%7B%22xPaddingHeader%22%3A%22X-Cache%22%2C%22xmux%22%3A%7B%22hKeepAlivePeriod%22%3A15%7D%7D&host=cdn.example.com&mode=packet-up&path=%2Fapi%2Fv2.jpg%2F&security=tls&sni=cdn.example.com&type=xhttp&fp=chrome#%F0%9F%87%A8%F0%9F%87%AD%20CDN%20%7C%20Timeweb
+vless://3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f@203.0.113.10:443?encryption=none&flow=xtls-rprx-vision&fp=chrome&pbk=Jx5cZ4XH3ncnbvvS4Ov9kA0OmvpEr7X3SqJ3Hkdhc2c&security=reality&sid=6ba85179e30d4fc2&sni=www.swiss.com&type=tcp&headerType=none#Reality%20direct
+hysteria2://s3cr3t%2Bpass@hy2.example.com:443/?sni=hy2.example.com&insecure=0#Hysteria2
+
+not a share link, a comment line from a provider
+hy2://s3cr3t@[2001:db8::10]:8443?sni=hy2.example.com#IPv6%20hy2
+trojan://trojan-pass@ws.example.com:443?security=tls&type=ws&path=%2Fws&host=ws.example.com&sni=ws.example.com#Trojan%20WS
+ss://YWVzLTEyOC1nY206c3MtcGFzcw@ss.example.com:8388#Shadowsocks%20AEAD
+vmess://eyJ2IjoiMiIsInBzIjoiVk1lc3Mgd3MiLCJhZGQiOiJ2bS5leGFtcGxlLmNvbSIsInBvcnQiOiI0NDMiLCJpZCI6IjViMGY1ZTZhLTFjMmQtNGUzZi04YTliLTBjMWQyZTNmNGE1YiIsImFpZCI6IjAiLCJuZXQiOiJ3cyIsInR5cGUiOiJub25lIiwiaG9zdCI6InZtLmV4YW1wbGUuY29tIiwicGF0aCI6Ii92bSIsInRscyI6InRscyIsInNuaSI6InZtLmV4YW1wbGUuY29tIn0=

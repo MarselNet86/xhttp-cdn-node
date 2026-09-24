@@ -1,0 +1,3 @@
+# Subscription fixtures are byte-exact: sub-links.txt keeps the CRLF line ends that
+# panels send.
+tests/fixtures/** -text
