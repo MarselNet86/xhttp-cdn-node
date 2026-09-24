@@ -25,10 +25,12 @@ fi
 readonly EXIT_FAILURE=1 EXIT_INPUT=2 EXIT_DEPS=3 EXIT_ROOT=4 EXIT_DISTRO=5 \
   EXIT_CERTS=6 EXIT_NGINX=7 EXIT_VALIDATE=8
 
-# .env lives in the repository root next to deploy.sh.
+# .env lives in the repository root next to deploy.sh. Modules write system files under
+# $SYSROOT: empty in production, a scratch directory when tests set CDN_DEPLOY_SYSROOT.
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # shellcheck disable=SC2034  # read by the scripts that source this file
-readonly REPO_ROOT ENV_FILE="$REPO_ROOT/.env" ENV_EXAMPLE="$REPO_ROOT/.env.example"
+readonly REPO_ROOT ENV_FILE="$REPO_ROOT/.env" ENV_EXAMPLE="$REPO_ROOT/.env.example" \
+  SYSROOT="${CDN_DEPLOY_SYSROOT:-}"
 
 # --- logger: stderr only, stdout stays free for data meant for the user -------------
 
@@ -107,6 +109,28 @@ pkg::install() {
   read -ra cmd <<<"$PKG_INSTALL"
   "${cmd[@]}" "${missing[@]}" >&2 ||
     log::die "$EXIT_DEPS" "cannot install ${missing[*]}: see the apt output above"
+}
+
+# --- files ------------------------------------------------------------------------------
+
+# Writes CONTENT and a final newline to PATH with MODE, atomically. An identical file keeps
+# its timestamp and only gets MODE. Sets FS_CHANGED to 1 when the content changed, else 0.
+fs::write() {
+  local path="$1" mode="$2" content="$3" tmp
+  FS_CHANGED=0
+  if [[ -f "$path" && "$(<"$path")" == "$content" ]]; then
+    chmod "$mode" "$path"
+    log::info "$path is up to date"
+    return 0
+  fi
+  tmp="$(mktemp "$path.XXXXXX")" || log::die "$EXIT_FAILURE" "cannot create a file next to $path"
+  if ! printf '%s\n' "$content" >"$tmp" || ! chmod "$mode" "$tmp" || ! mv -f "$tmp" "$path"; then
+    rm -f "$tmp"
+    log::die "$EXIT_FAILURE" "cannot write $path"
+  fi
+  # shellcheck disable=SC2034  # read by the callers
+  FS_CHANGED=1
+  log::info "wrote $path (mode $mode)"
 }
 
 # --- validators: return 0 or 1 and print nothing ----------------------------------------
