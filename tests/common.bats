@@ -385,7 +385,7 @@ EOF
   [ "$ISSUE_CDN_ORIGIN_CERT" = true ]
   [ "$REALITY_SNI" = www.swiss.com ]
   for key in VLESS_DOMAIN HY2_DOMAIN CDN_DOMAIN ORIGIN_IP CF_API_TOKEN LE_EMAIL \
-    REALITY_PRIVATE_KEY REALITY_SHORT_ID; do
+    REALITY_PRIVATE_KEY REALITY_SHORT_ID NODE_NAME; do
     [ -z "${!key}" ] || {
       echo "$key must have no default"
       return 1

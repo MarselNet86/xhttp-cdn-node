@@ -12,7 +12,7 @@ setup() {
     "$BATS_TEST_DIRNAME/../.env.example" "$REPO/"
   export STUB_DIR="$TMP"
   export CDN_DOMAIN=cdn.example.com XHTTP_PATH=/api/v2.jpg/ XHTTP_PORT=4443 NGINX_TLS_PORT=8444
-  export ORIGIN_IP=203.0.113.10
+  export ORIGIN_IP=203.0.113.10 NODE_NAME=node1
   # shellcheck source=../lib/remnawave.sh
   source "$REPO/lib/remnawave.sh"
   remnawave::emit >/dev/null 2>&1
@@ -118,7 +118,7 @@ calls() {
   rm "$TMP/xray-up"
   run validate::layers
   [ "$status" -eq 8 ]
-  [[ "$output" == *"layer 1 (xray) failed: nothing listens on 127.0.0.1:4443: no node runs the VLESS-XHTTP-CDN inbound yet. Do panel steps 1 and 2 above"* ]]
+  [[ "$output" == *"layer 1 (xray) failed: nothing listens on 127.0.0.1:4443: no node runs the VLESS-XHTTP-CDN-NODE1 inbound yet. Do panel steps 1 and 2 above"* ]]
   [ "$(calls 'https://')" -eq 0 ]
 }
 

@@ -25,6 +25,7 @@ prompt::collect() {
       ORIGIN_IP) prompt::_ask_origin_ip ;;
       ISSUE_CDN_ORIGIN_CERT) prompt::_ask_issue_cdn_cert ;;
       REALITY_PRIVATE_KEY | REALITY_SHORT_ID) prompt::_ask_reality "$key" ;;
+      NODE_NAME) prompt::_ask_node_name ;;
       *) prompt::_ask "$key" ;;
     esac
   done
@@ -165,6 +166,10 @@ prompt::validate() {
     REALITY_SHORT_ID)
       [[ "$value" =~ ^([0-9a-f]{2}){1,8}$ ]] || reason="expected 2 to 16 hex digits, an even count"
       ;;
+    NODE_NAME)
+      [[ "$value" =~ ^[a-z0-9]([a-z0-9-]{0,14}[a-z0-9])?$ ]] ||
+        reason="expected a short name like de1: up to 16 letters, digits and inner -$(prompt::_foreign_chars "$value" a-z0-9-)"
+      ;;
     *) reason="$key is not in the .env contract" ;;
   esac
   if [[ -n "$reason" ]]; then
@@ -184,7 +189,7 @@ prompt::_normalize() {
       ;;
   esac
   case "$key" in
-    *_DOMAIN | CERT_MODE | REALITY_SNI | REALITY_SHORT_ID) value="${value,,}" ;;
+    *_DOMAIN | CERT_MODE | REALITY_SNI | REALITY_SHORT_ID | NODE_NAME) value="${value,,}" ;;
   esac
   printf '%s' "$value"
 }
@@ -261,6 +266,7 @@ prompt::_question() {
     REALITY_SNI) echo "Site that VLESS Reality impersonates|TLS 1.3, close to this server, open from Russia; - for no Reality" ;;
     REALITY_PRIVATE_KEY) echo "Reality x25519 private key|input hidden" ;;
     REALITY_SHORT_ID) echo "Reality short id|hex" ;;
+    NODE_NAME) echo "Short name of this node for the panel|the inbound tags end with it, de1 gives VLESS-REALITY-DE1: the panel wants every tag unique" ;;
   esac
 }
 
@@ -365,6 +371,17 @@ prompt::_new_reality_key() {
 
 prompt::_new_short_id() {
   head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n'
+}
+
+# Without a name in .env, the first label of VLESS_DOMAIN names the node, else the host.
+prompt::_ask_node_name() {
+  local name="${NODE_NAME:-}"
+  if [[ -z "$name" && -n "${VLESS_DOMAIN:-}" ]]; then
+    name="${VLESS_DOMAIN%%.*}"
+  elif [[ -z "$name" ]]; then
+    name="$(hostname -s 2>/dev/null || true)"
+  fi
+  prompt::_ask NODE_NAME "${name,,}"
 }
 
 # VLESS_DOMAIN may be skipped before CERT_MODE is known. When the answers leave origin

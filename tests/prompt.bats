@@ -102,6 +102,8 @@ invalid() {
   [[ "$REALITY_PRIVATE_KEY" =~ ^[A-Za-z0-9_-]{43}$ ]]
   [[ "$REALITY_SHORT_ID" =~ ^[0-9a-f]{16}$ ]]
   [[ "$shown" != *"$REALITY_PRIVATE_KEY"* ]]
+  # The first label of VLESS_DOMAIN names the node.
+  [ "$NODE_NAME" = vless ]
 }
 
 @test "the Reality keys stay across reruns, and - for REALITY_SNI skips them" {
@@ -148,8 +150,23 @@ invalid() {
   [ "$ISSUE_CDN_ORIGIN_CERT" = true ]
 }
 
+@test "the node name defaults to the first label of VLESS_DOMAIN, else to the host name" {
+  printf '#!/bin/sh\necho Edge-7\n' >"$TMP/bin/hostname"
+  chmod +x "$TMP/bin/hostname"
+  collect "" - cdn.example.com 203.0.113.10 "" "" "" "" tok-7f3a9 "" ""
+  [ "$status" -eq 0 ]
+  env::load "$ENV_FILE"
+  [ "$NODE_NAME" = edge-7 ]
+  rm "$ENV_FILE"
+  collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 \
+    "" "" "" "" tok-7f3a9 "" "" "" "" "" "" De1
+  [ "$status" -eq 0 ]
+  env::load "$ENV_FILE"
+  [ "$NODE_NAME" = de1 ]
+}
+
 @test "http-01 without a domain of this server asks for VLESS_DOMAIN again" {
-  collect "" "" cdn.example.com 203.0.113.10 "" "" "" http-01 "" "" "" "" vless.example.com
+  collect "" "" cdn.example.com 203.0.113.10 "" "" "" http-01 "" "" "" "" "" vless.example.com
   [ "$status" -eq 0 ]
   [[ "$output" == *"origin nginx needs a certificate: under http-01 or ISSUE_CDN_ORIGIN_CERT=false it comes from VLESS_DOMAIN"* ]]
   env::load "$ENV_FILE"
@@ -209,12 +226,12 @@ invalid() {
   ui::enable
   fresh
   [ "$status" -eq 0 ]
-  first=$'\n  \e[2m 1/15\e[0m  \e[1mDomain for direct VLESS connections\e[0m\n'
+  first=$'\n  \e[2m 1/16\e[0m  \e[1mDomain for direct VLESS connections\e[0m\n'
   first+=$'         \e[2man A record to this server; - for none\e[0m\n'
   first+=$'         \e[36mVLESS_DOMAIN\e[0m \e[2m\xe2\x80\xba\e[0m '
   [[ "$output" == *"$first"* ]]
   [[ "$output" == *$'\e[36mXHTTP_PORT\e[0m \e[2m[4443] \xe2\x80\xba\e[0m '* ]]
-  [[ "$output" == *$'\e[2m15/15\e[0m  \e[1mReality short id\e[0m'* ]]
+  [[ "$output" == *$'\e[2m15/16\e[0m  \e[1mReality short id\e[0m'* ]]
   [[ "$output" != *tok-7f3a9* ]]
   env::load "$ENV_FILE"
   [ "$CDN_DOMAIN" = cdn.example.com ]
@@ -225,14 +242,14 @@ invalid() {
   collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 \
     "" "" "" http-01 "" ""
   [ "$status" -eq 0 ]
-  [[ "$output" == *$'\e[2m 8/15\e[0m  \e[1mCertificate issuance'* ]]
-  [[ "$output" == *$'\e[2m 9/13\e[0m  \e[1mLet\'s Encrypt contact email'* ]]
-  [[ "$output" == *$'\e[2m13/13\e[0m  \e[1mReality short id'* ]]
+  [[ "$output" == *$'\e[2m 8/16\e[0m  \e[1mCertificate issuance'* ]]
+  [[ "$output" == *$'\e[2m 9/14\e[0m  \e[1mLet\'s Encrypt contact email'* ]]
+  [[ "$output" == *$'\e[2m13/14\e[0m  \e[1mReality short id'* ]]
   rm "$ENV_FILE"
   collect "" - cdn.example.com 203.0.113.10 "" "" "" "" tok-7f3a9 "" ""
   [ "$status" -eq 0 ]
-  [[ "$output" == *$'\e[2m 2/15\e[0m  \e[1mDomain for Hysteria2'* ]]
-  [[ "$output" == *$'\e[2m 3/14\e[0m  \e[1mDomain of the CDN resource'* ]]
+  [[ "$output" == *$'\e[2m 2/16\e[0m  \e[1mDomain for Hysteria2'* ]]
+  [[ "$output" == *$'\e[2m 3/15\e[0m  \e[1mDomain of the CDN resource'* ]]
 }
 
 @test "on a terminal a refused answer gets its reason in red under the field" {
@@ -491,6 +508,13 @@ EOF
   invalid REALITY_PRIVATE_KEY "" short "c3ludGhldGljLXJlYWxpdHkta2V5LWZvci10ZXN0c+E"
   valid REALITY_SHORT_ID 1a2b3c4d5e6f7a8b ab
   invalid REALITY_SHORT_ID "" abc 1a2b3c4d5e6f7a8baa xyz0
+}
+
+@test "prompt::validate: the node name is a short label that ends the inbound tags" {
+  valid NODE_NAME de1 a node-1 0123456789abcdef
+  invalid NODE_NAME "" -de1 de1- de_1 de.1 "de 1" 0123456789abcdefg DE1
+  run prompt::validate NODE_NAME de_1
+  [ "$output" = "expected a short name like de1: up to 16 letters, digits and inner -; it holds '_' at 3" ]
 }
 
 @test "prompt::validate prints the reason and rejects keys outside the contract" {

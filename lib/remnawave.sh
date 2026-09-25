@@ -24,7 +24,7 @@ remnawave::emit() {
   local out="$REPO_ROOT/out/remnawave" inbound host reality="" hy2="" profile template
   local file changed=0
   require::cmd envsubst jq
-  env::require CDN_DOMAIN XHTTP_PATH XHTTP_PORT
+  env::require CDN_DOMAIN XHTTP_PATH XHTTP_PORT NODE_NAME
   inbound="$(remnawave::_render inbound-xhttp-cdn.json.tmpl)"
   host="$(<"$REPO_ROOT/remnawave/host-xhttp-extra.json")"
   jq -e . >/dev/null <<<"$host" ||
@@ -64,13 +64,16 @@ remnawave::emit() {
 }
 
 # Renders remnawave/NAME with the .env values it names and checks that it is JSON.
+# NODE_TAG, the node name in capitals, ends the inbound tags: the panel wants every tag
+# unique across its profiles.
 remnawave::_render() {
   local name="$1" out
   # shellcheck disable=SC2016  # envsubst takes the placeholder list literally
   out="$(CDN_DOMAIN="$CDN_DOMAIN" XHTTP_PATH="$XHTTP_PATH" XHTTP_PORT="$XHTTP_PORT" \
     HY2_DOMAIN="${HY2_DOMAIN:-}" REALITY_SNI="${REALITY_SNI:-}" \
     REALITY_PRIVATE_KEY="${REALITY_PRIVATE_KEY:-}" REALITY_SHORT_ID="${REALITY_SHORT_ID:-}" \
-    envsubst '${CDN_DOMAIN} ${XHTTP_PATH} ${XHTTP_PORT} ${HY2_DOMAIN} ${REALITY_SNI} ${REALITY_PRIVATE_KEY} ${REALITY_SHORT_ID}' \
+    NODE_TAG="${NODE_NAME^^}" \
+    envsubst '${CDN_DOMAIN} ${XHTTP_PATH} ${XHTTP_PORT} ${HY2_DOMAIN} ${REALITY_SNI} ${REALITY_PRIVATE_KEY} ${REALITY_SHORT_ID} ${NODE_TAG}' \
     <"$REPO_ROOT/remnawave/$name")"
   jq -e . >/dev/null <<<"$out" || log::die "$EXIT_FAILURE" "remnawave/$name does not render to valid JSON"
   printf '%s' "$out"
@@ -115,31 +118,33 @@ remnawave::_check_sync() {
 # lists them.
 remnawave::_guide() {
   local out="${1#"$REPO_ROOT"/}" pause="$2" step=0 inbounds="" address bold="" reset=""
+  local tag="${NODE_NAME^^}"
   local -a hosts
   # The colours follow stderr; a guide sent to a file stays plain.
   if [[ -t 1 ]]; then
     bold="$UI_BOLD" reset="$UI_RESET"
   fi
   if [[ -n "${REALITY_SNI:-}" ]]; then
-    inbounds+="VLESS-REALITY on :443/tcp, "
+    inbounds+="VLESS-REALITY-$tag on :443/tcp, "
   fi
-  inbounds+="VLESS-XHTTP-CDN on 127.0.0.1:$XHTTP_PORT"
+  inbounds+="VLESS-XHTTP-CDN-$tag on 127.0.0.1:$XHTTP_PORT"
   if [[ -n "${HY2_DOMAIN:-}" ]]; then
-    inbounds+=", HYSTERIA2 on :443/udp"
+    inbounds+=", HYSTERIA2-$tag on :443/udp"
   fi
   address="${VLESS_DOMAIN:-${ORIGIN_IP:-<IP of this server>}}"
-  hosts=("CDN: inbound VLESS-XHTTP-CDN, address $CDN_DOMAIN, port 443. Advanced: SNI and host $CDN_DOMAIN, path $XHTTP_PATH, security TLS, extra <- $out/host-xhttp-extra.json")
+  hosts=("CDN: inbound VLESS-XHTTP-CDN-$tag, address $CDN_DOMAIN, port 443. Advanced: SNI and host $CDN_DOMAIN, path $XHTTP_PATH, security TLS, extra <- $out/host-xhttp-extra.json")
   if [[ -n "${REALITY_SNI:-}" ]]; then
-    hosts+=("Reality: inbound VLESS-REALITY, address $address, port 443")
+    hosts+=("Reality: inbound VLESS-REALITY-$tag, address $address, port 443")
   fi
   if [[ -n "${HY2_DOMAIN:-}" ]]; then
-    hosts+=("Hysteria2: inbound HYSTERIA2, address $HY2_DOMAIN, port 443. Advanced: SNI $HY2_DOMAIN")
+    hosts+=("Hysteria2: inbound HYSTERIA2-$tag, address $HY2_DOMAIN, port 443. Advanced: SNI $HY2_DOMAIN")
   fi
 
   printf '\n%sRemnawave panel and the CDN resource, step by step.%s The files are in %s/.\n' \
     "$bold" "$reset" "$out"
+  # Profile names are unique in the panel too, so the node name serves as one.
   remnawave::_step "Config profile" \
-    "Config Profiles -> Create Config Profile -> a name -> paste $out/config-profile.json -> Save." \
+    "Config Profiles -> Create Config Profile -> the name $tag -> paste $out/config-profile.json -> Save." \
     "Inbounds: $inbounds." \
     "The node keeps a profile of its own? Put only $out/inbound-xhttp-cdn.json into its \"inbounds\"."
   # The panel asks for the profile when it creates a node, so the node comes second.

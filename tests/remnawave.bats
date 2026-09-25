@@ -12,7 +12,7 @@ setup() {
     "$BATS_TEST_DIRNAME/../.env.example" "$REPO/"
   # shellcheck source=../lib/remnawave.sh
   source "$REPO/lib/remnawave.sh"
-  export CDN_DOMAIN=cdn.example.com XHTTP_PATH=/api/v2.jpg/ XHTTP_PORT=4443
+  export CDN_DOMAIN=cdn.example.com XHTTP_PATH=/api/v2.jpg/ XHTTP_PORT=4443 NODE_NAME=node1
   OUT="$REPO/out/remnawave"
 }
 
@@ -76,12 +76,13 @@ host_extra() {
   [ "$status" -eq 0 ]
   order="$(grep -oE '^  [0-9]\. [A-Za-z]+' <<<"$output" | tr -s ' ' | tr '\n' '|')"
   [ "$order" = " 1. Config| 2. Node| 3. Internal| 4. Subscription| 5. Hosts| 6. CDN|" ]
+  [[ "$output" == *"Create Config Profile -> the name NODE1 -> paste out/remnawave/config-profile.json"* ]]
   [[ "$output" == *"paste out/remnawave/config-profile.json"* ]]
   [[ "$output" == *"Put only out/remnawave/inbound-xhttp-cdn.json into its \"inbounds\""* ]]
   [[ "$output" == *"paste out/remnawave/subscription-xray-json.json"* ]]
-  [[ "$output" == *"CDN: inbound VLESS-XHTTP-CDN, address cdn.example.com, port 443. Advanced: SNI and host cdn.example.com, path /api/v2.jpg/, security TLS, extra <- out/remnawave/host-xhttp-extra.json"* ]]
-  [[ "$output" == *"Reality: inbound VLESS-REALITY, address vless.example.com, port 443"* ]]
-  [[ "$output" == *"Hysteria2: inbound HYSTERIA2, address hy2.example.com"* ]]
+  [[ "$output" == *"CDN: inbound VLESS-XHTTP-CDN-NODE1, address cdn.example.com, port 443. Advanced: SNI and host cdn.example.com, path /api/v2.jpg/, security TLS, extra <- out/remnawave/host-xhttp-extra.json"* ]]
+  [[ "$output" == *"Reality: inbound VLESS-REALITY-NODE1, address vless.example.com, port 443"* ]]
+  [[ "$output" == *"Hysteria2: inbound HYSTERIA2-NODE1, address hy2.example.com"* ]]
   [[ "$output" == *"Source: 203.0.113.10:8444, HTTPS for the source on"* ]]
   [[ "$output" != *INFO* ]]
 }
@@ -114,7 +115,7 @@ host_extra() {
   full_node
   emit
   [ "$status" -eq 0 ]
-  [ "$(jq -c '[.inbounds[].tag]' "$OUT/config-profile.json")" = '["VLESS-REALITY","VLESS-XHTTP-CDN","HYSTERIA2"]' ]
+  [ "$(jq -c '[.inbounds[].tag]' "$OUT/config-profile.json")" = '["VLESS-REALITY-NODE1","VLESS-XHTTP-CDN-NODE1","HYSTERIA2-NODE1"]' ]
   jq -e '.inbounds[0].streamSettings.realitySettings == {dest: "www.swiss.com:443", show: false, xver: 0,
       shortIds: ["", "1a2b3c4d5e6f7a8b"], privateKey: "c3ludGhldGljLXJlYWxpdHkta2V5LWZvci10ZXN0cyE",
       serverNames: ["www.swiss.com"]}
@@ -128,12 +129,12 @@ host_extra() {
 @test "without REALITY_SNI or HY2_DOMAIN the profile leaves those inbounds out" {
   emit
   [ "$status" -eq 0 ]
-  [ "$(jq -c '[.inbounds[].tag]' "$OUT/config-profile.json")" = '["VLESS-XHTTP-CDN"]' ]
+  [ "$(jq -c '[.inbounds[].tag]' "$OUT/config-profile.json")" = '["VLESS-XHTTP-CDN-NODE1"]' ]
   [[ "$output" != *"Reality:"* && "$output" != *"Hysteria2:"* && "$output" != *"/etc/letsencrypt:/etc/letsencrypt:ro"* ]]
   [[ "$output" == *"Create node, address <IP of this server>;"* ]]
   HY2_DOMAIN=hy2.example.com emit
   [ "$status" -eq 0 ]
-  jq -e '.inbounds[1].tag == "HYSTERIA2" and (.inbounds[1].streamSettings.hysteriaSettings | has("masquerade") | not)' \
+  jq -e '.inbounds[1].tag == "HYSTERIA2-NODE1" and (.inbounds[1].streamSettings.hysteriaSettings | has("masquerade") | not)' \
     "$OUT/config-profile.json"
 }
 

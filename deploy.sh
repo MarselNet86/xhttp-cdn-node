@@ -74,7 +74,7 @@ deploy::preflight() {
 deploy::load_config() {
   env::load "$ENV_EXAMPLE"
   env::load "$ENV_FILE"
-  env::require CDN_DOMAIN ORIGIN_IP
+  env::require CDN_DOMAIN ORIGIN_IP NODE_NAME
   if [[ "${CERT_MODE:-}" == dns-cloudflare ]]; then
     env::require CF_API_TOKEN
   fi

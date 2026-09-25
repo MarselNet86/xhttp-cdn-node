@@ -137,6 +137,7 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 | `REALITY_SNI` | `www.swiss.com` | сайт, под который маскируется Reality: TLS 1.3, рядом с сервером, открыт из России; `-` — профиль без Reality |
 | `REALITY_PRIVATE_KEY` | генерируется | x25519-ключ Reality, хранится в `.env` |
 | `REALITY_SHORT_ID` | генерируется | short id Reality |
+| `NODE_NAME` | первая метка `VLESS_DOMAIN` или имя хоста | короткое имя ноды, например `de1`: им заканчиваются теги инбаундов (`VLESS-REALITY-DE1`), и оно же имя профиля |
 
 Порты можно менять. Оба должны отличаться друг от друга и от 443, который занимают Reality и Hysteria2. После смены порта обновите инбаунд в панели (`XHTTP_PORT`) или источник ресурса Timeweb (`NGINX_TLS_PORT`).
 
@@ -154,7 +155,7 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 | `inbound-xhttp-cdn.json` | в `inbounds` уже существующего профиля | только xhttp-инбаунд, для ноды, которая оставляет свой профиль |
 
 **Шаги, которые покажет скрипт:**
-1. **Профиль.** Config Profiles → Create Config Profile → вставить `config-profile.json`.
+1. **Профиль.** Config Profiles → Create Config Profile → имя `NODE_NAME` заглавными → вставить `config-profile.json`.
 2. **Нода.** Nodes → Management → Create node, адрес — IP сервера. На последнем шаге мастера выбрать профиль из шага 1 со всеми инбаундами → Copy docker-compose.yml → Create node. На сервере положить файл в `/opt/remnanode/docker-compose.yml` и выполнить `cd /opt/remnanode && docker compose up -d`. Если Docker ещё нет, его ставит `curl -fsSL https://get.docker.com | sh`. Нода уже есть в панели: карточка ноды → Change Profile → профиль из шага 1.
 3. **Сквад.** Internal Squads → сквад ваших пользователей → включить новые инбаунды. Без этого пользователи их не получат.
 4. **Шаблон подписки.** Templates → Xray JSON → новый шаблон → вставить `subscription-xray-json.json`.
@@ -162,6 +163,8 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 6. **Ресурс Timeweb:** источник, домен раздачи, сертификат.
 
 **Ключи Reality** скрипт генерирует один раз и хранит в `.env`. Повторный запуск их не меняет, и клиенты продолжают работать.
+
+**Теги инбаундов** заканчиваются на `NODE_NAME`: `VLESS-REALITY-DE1`, `VLESS-XHTTP-CDN-DE1`, `HYSTERIA2-DE1`. Панель требует, чтобы теги были уникальны во всех профилях, иначе профиль второй ноды не сохранится. Поэтому у каждой ноды своё имя.
 
 **Повторный запуск** с теми же файлами не останавливается на шагах: панель уже настроена.
 
