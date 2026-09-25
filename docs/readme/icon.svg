@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="cdn-deploy">
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#0b0b0c"/>
+  <g fill="none" stroke="#62d26f" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M70 176 L128 88 L186 176"/>
+  </g>
+  <circle cx="70" cy="176" r="20" fill="#62d26f"/>
+  <circle cx="128" cy="88" r="26" fill="#0b0b0c" stroke="#62d26f" stroke-width="14"/>
+  <rect x="164" y="154" width="44" height="44" rx="12" fill="#62d26f"/>
+</svg>
