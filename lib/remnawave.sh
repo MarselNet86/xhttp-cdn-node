@@ -114,8 +114,12 @@ remnawave::_check_sync() {
 # files) makes a terminal session wait after each step: a rerun with the same files only
 # lists them.
 remnawave::_guide() {
-  local out="${1#"$REPO_ROOT"/}" pause="$2" step=0 inbounds="" address
+  local out="${1#"$REPO_ROOT"/}" pause="$2" step=0 inbounds="" address bold="" reset=""
   local -a hosts
+  # The colours follow stderr; a guide sent to a file stays plain.
+  if [[ -t 1 ]]; then
+    bold="$UI_BOLD" reset="$UI_RESET"
+  fi
   if [[ -n "${REALITY_SNI:-}" ]]; then
     inbounds+="VLESS-REALITY on :443/tcp, "
   fi
@@ -132,7 +136,8 @@ remnawave::_guide() {
     hosts+=("Hysteria2: inbound HYSTERIA2, address $HY2_DOMAIN, port 443. Advanced: SNI $HY2_DOMAIN")
   fi
 
-  printf '\nRemnawave panel and the CDN resource, step by step. The files are in %s/.\n' "$out"
+  printf '\n%sRemnawave panel and the CDN resource, step by step.%s The files are in %s/.\n' \
+    "$bold" "$reset" "$out"
   remnawave::_step "Config profile" \
     "Config Profiles -> Create Config Profile -> a name -> paste $out/config-profile.json -> Save." \
     "Inbounds: $inbounds." \
@@ -161,7 +166,7 @@ remnawave::_step() {
   local title="$1" line
   shift
   step=$((step + 1))
-  printf '\n  %d. %s\n' "$step" "$title"
+  printf '\n  %s%d. %s%s\n' "$bold" "$step" "$title" "$reset"
   for line in "$@"; do
     if [[ -n "$line" ]]; then
       printf '     %s\n' "$line"

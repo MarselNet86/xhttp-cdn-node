@@ -86,6 +86,13 @@ host_extra() {
   [[ "$output" != *INFO* ]]
 }
 
+@test "the guide keeps colours out of a stdout that is no terminal" {
+  run bash -c 'source "$1" && ui::enable && remnawave::emit 2>"$2"' _ "$REPO/lib/remnawave.sh" "$TMP/stderr"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1. Config profile"* ]]
+  [[ "$output" != *$'\e['* ]]
+}
+
 @test "the node comes after the profile: the panel creates it with the profile, its compose file starts it here" {
   local step1 step2
   full_node

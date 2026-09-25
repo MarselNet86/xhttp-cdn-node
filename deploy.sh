@@ -90,7 +90,7 @@ deploy::run() {
     n=$((n + 1))
     declare -F "${needs:-$fn}" >/dev/null ||
       log::die "$EXIT_FAILURE" "step $id: ${needs:-$fn} is not implemented yet"
-    log::info "step $n/${#STEPS[@]}: $id"
+    log::step "$n/${#STEPS[@]}" "$id"
     "$fn"
   done
   log::info "deploy finished"

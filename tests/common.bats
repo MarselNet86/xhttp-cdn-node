@@ -118,6 +118,35 @@ os_release() {
   [ "$output" = "[ERROR] nginx -t failed" ]
 }
 
+@test "a step opens with an info line, and with a coloured heading on a terminal" {
+  local want
+  log::step 2/10 input 2>"$TMP/plain"
+  [ "$(cat "$TMP/plain")" = "[INFO] step 2/10: input" ]
+  ui::enable
+  {
+    log::info one
+    log::warn two
+    log::error three
+    log::step 2/10 input
+  } 2>"$TMP/err"
+  want=$'\e[36m[INFO]\e[0m one\n\e[1m\e[33m[WARN]\e[0m two\n\e[1m\e[31m[ERROR]\e[0m three\n'
+  want+=$'\n\e[1m\e[32m==>\e[0m \e[1mStep 2/10: input\e[0m'
+  [ "$(cat "$TMP/err")" = "$want" ]
+}
+
+@test "colours need stderr on a terminal and stay off under NO_COLOR and TERM=dumb" {
+  script --version >/dev/null 2>&1 || skip "needs script from util-linux for a terminal"
+  printf 'source %q\nlog::warn x\n' "$BATS_TEST_DIRNAME/../lib/common.sh" >"$TMP/warn.sh"
+  run env TERM=xterm script -qec "bash $TMP/warn.sh" /dev/null
+  [[ "$output" == *$'\e[1m\e[33m[WARN]\e[0m x'* ]]
+  run env TERM=xterm NO_COLOR=1 script -qec "bash $TMP/warn.sh" /dev/null
+  [[ "$output" == *"[WARN] x"* && "$output" != *$'\e['* ]]
+  run env TERM=dumb script -qec "bash $TMP/warn.sh" /dev/null
+  [[ "$output" == *"[WARN] x"* && "$output" != *$'\e['* ]]
+  run env TERM=xterm script -qec "bash $TMP/warn.sh 2>$TMP/log" /dev/null
+  [ "$(cat "$TMP/log")" = "[WARN] x" ]
+}
+
 @test "require::cmd passes for present commands and exits 3 naming a missing one" {
   run require::cmd bash printf
   [ "$status" -eq 0 ]

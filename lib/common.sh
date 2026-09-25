@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Shared base of cdn-deploy: logger, guards, OS detection, validators, .env loading.
-# Entry points source it first; it only defines constants and functions.
+# Entry points source it first; it defines constants and functions and picks the colours.
 
 set -euo pipefail
 
@@ -32,17 +32,47 @@ REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 readonly REPO_ROOT ENV_FILE="$REPO_ROOT/.env" ENV_EXAMPLE="$REPO_ROOT/.env.example" \
   SYSROOT="${CDN_DEPLOY_SYSROOT:-}"
 
+# --- terminal ---------------------------------------------------------------------------
+
+# A person at a terminal gets colours; a log file, a pipe or a test gets plain text.
+# NO_COLOR (no-color.org) and TERM=dumb keep it plain.
+ui::init() {
+  UI_STYLE=0
+  UI_RESET="" UI_BOLD="" UI_RED="" UI_GREEN="" UI_YELLOW="" UI_CYAN=""
+  if [[ -t 2 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != dumb ]]; then
+    ui::enable
+  fi
+}
+
+ui::enable() {
+  UI_STYLE=1
+  UI_RESET=$'\e[0m' UI_BOLD=$'\e[1m' UI_RED=$'\e[31m' UI_GREEN=$'\e[32m'
+  UI_YELLOW=$'\e[33m' UI_CYAN=$'\e[36m'
+}
+
+ui::init
+
 # --- logger: stderr only, stdout stays free for data meant for the user -------------
 
-log::info() { printf '[INFO] %s\n' "$*" >&2; }
-log::warn() { printf '[WARN] %s\n' "$*" >&2; }
-log::error() { printf '[ERROR] %s\n' "$*" >&2; }
+log::info() { printf '%s[INFO]%s %s\n' "$UI_CYAN" "$UI_RESET" "$*" >&2; }
+log::warn() { printf '%s[WARN]%s %s\n' "$UI_BOLD$UI_YELLOW" "$UI_RESET" "$*" >&2; }
+log::error() { printf '%s[ERROR]%s %s\n' "$UI_BOLD$UI_RED" "$UI_RESET" "$*" >&2; }
 
 log::die() {
   local code="$1"
   shift
   log::error "$*"
   exit "$code"
+}
+
+# Opens step N/TOTAL named ID: a heading on a terminal, an info line elsewhere.
+log::step() {
+  if ((UI_STYLE)); then
+    printf '\n%s==>%s %sStep %s: %s%s\n' "$UI_BOLD$UI_GREEN" "$UI_RESET" "$UI_BOLD" "$1" "$2" \
+      "$UI_RESET" >&2
+  else
+    log::info "step $1: $2"
+  fi
 }
 
 # --- guards ---------------------------------------------------------------------------
