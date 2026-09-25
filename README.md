@@ -51,7 +51,7 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 
 | | |
 |---|---|
-| **Сервер** | Ubuntu 22.04/24.04 или Debian 12, доступ root. Нода Remnawave в docker-контейнере `remnawave-node`; если он называется иначе, поправьте `NODE_RELOAD_CMD` |
+| **Сервер** | Ubuntu 22.04/24.04 или Debian 12, доступ root. Сначала на нём ставится нода Remnawave по [официальной инструкции](https://docs.rw/install/remnawave-node/) (контейнер `remnanode`), потом этот скрипт |
 | **Домены** | `CDN_DOMAIN`: поддомен с CNAME на технический домен ресурса Timeweb (`*.cdn.twcstorage.ru`). `VLESS_DOMAIN` и `HY2_DOMAIN` по желанию: A-записи на IP ноды, см. [уже работающий сервер](#уже-работающий-сервер) |
 | **Сертификаты** | DNS-зона в Cloudflare: `dns-cloudflare` и токен с правом `Zone:DNS:Edit`. Зона у любого другого DNS: `http-01` и открытый порт 80 |
 | **Firewall** | 8444/tcp для CDN, 443/tcp и 443/udp для Reality и Hysteria2, 80/tcp в режиме `http-01` |
@@ -108,7 +108,7 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 | 6 | `renew-hook` | хук продления и `certbot.timer` |
 | 7 | `sysctl` | тюнинг ядра, лимиты `nofile`, резерв портов |
 | 8 | `nginx` | конфиг из `templates/`, `nginx -t`, reload, откат при ошибке |
-| 9 | `remnawave` | конфиги для панели в `out/remnawave/` и инструкция |
+| 9 | `remnawave` | файлы для панели в `out/remnawave/` и пошаговая инструкция по панели и Timeweb |
 | 10 | `validate` | послойная [проверка](#проверка-после-установки) |
 
 ### Параметры
@@ -127,8 +127,11 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 | `CERT_MODE` | `dns-cloudflare` | `dns-cloudflare` или `http-01` |
 | `CF_API_TOKEN` | — | токен Cloudflare, нужен только в режиме `dns-cloudflare` |
 | `LE_EMAIL` | пусто | контакт для Let's Encrypt |
-| `NODE_RELOAD_CMD` | `docker restart remnawave-node` | перезапуск ноды после продления сертификата Hysteria2; спрашивается только с `HY2_DOMAIN` |
+| `NODE_RELOAD_CMD` | `docker restart remnanode` | перезапуск ноды после продления сертификата Hysteria2; спрашивается только с `HY2_DOMAIN` |
 | `ISSUE_CDN_ORIGIN_CERT` | `true` | выпускать ли origin-сертификат для `CDN_DOMAIN` |
+| `REALITY_SNI` | `www.swiss.com` | сайт, под который маскируется Reality: TLS 1.3, рядом с сервером, открыт из России; `-` — профиль без Reality |
+| `REALITY_PRIVATE_KEY` | генерируется | x25519-ключ Reality, хранится в `.env` |
+| `REALITY_SHORT_ID` | генерируется | short id Reality |
 | `UUID` | генерируется | в контракте с ранних версий, ни на что не влияет: пользователей ведёт панель |
 
 Порты можно менять. Оба должны отличаться друг от друга и от 443, который занимают Reality и Hysteria2. После смены порта обновите инбаунд в панели (`XHTTP_PORT`) или источник ресурса Timeweb (`NGINX_TLS_PORT`).
@@ -137,14 +140,29 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 
 ## Шаг в панели Remnawave
 
-Конфиг xray на ноде ведёт панель, поэтому xhttp-инбаунд вы добавляете сами:
+Конфиг xray на ноде ведёт панель, поэтому скрипт готовит файлы для неё и проводит по шагам. После генерации он печатает шесть шагов и в терминале ждёт Enter после каждого, а проверка запускается уже после последнего.
 
-1. **Инбаунд.** Добавьте объект из `out/remnawave/inbound-xhttp-cdn.json` в массив `inbounds` конфиг-профиля ноды.
-2. **Хост.** В хосте для `CDN_DOMAIN` вставьте `out/remnawave/host-xhttp-extra.json` в поле `extra`. Остальные настройки хоста:
-   - адрес `CDN_DOMAIN`, порт 443;
-   - транспорт xhttp, режим packet-up, путь `XHTTP_PATH`;
-   - host и SNI `CDN_DOMAIN`, TLS.
-3. **Повторный запуск.** Когда нода примет конфиг, запустите `sudo ./deploy.sh` ещё раз: все четыре слоя должны пройти.
+| Файл в `out/remnawave/` | Куда в панели | Что внутри |
+|---|---|---|
+| `config-profile.json` | Config Profiles → новый профиль | полный конфиг ноды: VLESS Reality на :443, xhttp-инбаунд для CDN на `127.0.0.1:XHTTP_PORT`, Hysteria2 на :443/udp, DNS, outbounds, маршрутизация |
+| `host-xhttp-extra.json` | Hosts → хост для `CDN_DOMAIN` → поле `extra` | клиентская часть xhttp, синхронная с инбаундом |
+| `subscription-xray-json.json` | Templates → Xray JSON | шаблон подписки: русские сайты и ваша зона напрямую, реклама и торренты в блок, остальное через прокси |
+| `inbound-xhttp-cdn.json` | в `inbounds` уже существующего профиля | только xhttp-инбаунд, для ноды, которая оставляет свой профиль |
+
+**Шаги, которые покажет скрипт:**
+1. **Профиль.** Config Profiles → Create Config Profile → вставить `config-profile.json`.
+2. **Нода.** Nodes → Management → карточка ноды → Change Profile → новый профиль, все инбаунды включены.
+3. **Сквад.** Internal Squads → сквад ваших пользователей → включить новые инбаунды. Без этого пользователи их не получат.
+4. **Шаблон подписки.** Templates → Xray JSON → новый шаблон → вставить `subscription-xray-json.json`.
+5. **Хосты,** по одному на инбаунд. В Advanced каждого выбирается шаблон из шага 4. У CDN-хоста в поле `extra` идёт `host-xhttp-extra.json`, SNI и host — `CDN_DOMAIN`, путь `XHTTP_PATH`.
+6. **Ресурс Timeweb:** источник, домен раздачи, сертификат.
+
+**Ключи Reality** скрипт генерирует один раз и хранит в `.env`. Повторный запуск их не меняет, и клиенты продолжают работать.
+
+**Повторный запуск** с теми же файлами не останавливается на шагах: панель уже настроена.
+
+> [!IMPORTANT]
+> Hysteria2 читает сертификат `/etc/letsencrypt/live/HY2_DOMAIN/` внутри контейнера ноды. Добавьте в `/opt/remnanode/docker-compose.yml` том `/etc/letsencrypt:/etc/letsencrypt:ro` и перезапустите ноду до того, как назначите ей профиль. Иначе xray на ноде не запустится с этим конфигом.
 
 > [!WARNING]
 > Поля обфускации (`xPadding*`, `sessionID*`, `seq*`, `uplink*`, `serverMaxHeaderBytes`) должны совпадать на инбаунде и хосте один в один. Поменяли на одной стороне, меняйте и на второй, иначе туннель рвётся именно через CDN. Подробности и порядок тюнинга против 503 описаны в [remnawave/README.md](remnawave/README.md).

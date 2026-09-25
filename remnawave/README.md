@@ -6,10 +6,12 @@ Xray на ноде управляется панелью Remnawave, скрипт
 
 | Файл | Куда в Remnawave | Роль |
 |---|---|---|
-| `inbound-xhttp-cdn.json.tmpl` | конфиг инбаунда на ноде | серверный VLESS-XHTTP-CDN инбаунд (`127.0.0.1:${XHTTP_PORT}`), тюненные буферы |
+| `config-profile.json` + `inbound-*.json.tmpl` | Config Profiles, новый профиль | полный конфиг ноды: Reality, xhttp-CDN и Hysteria2 собираются из шаблонов инбаундов в основу профиля (DNS, outbounds, маршрутизация) |
+| `inbound-xhttp-cdn.json.tmpl` | `inbounds` профиля | серверный VLESS-XHTTP-CDN инбаунд (`127.0.0.1:${XHTTP_PORT}`), тюненные буферы |
 | `host-xhttp-extra.json` | поле `extra` в редакторе хоста | клиентский transport-блок для подписки, чистый `xmux` |
+| `subscription-xray-json.json` | Templates → Xray JSON | шаблон подписки; `__OWN_DOMAINS__` скрипт заменяет зоной `CDN_DOMAIN` и доменами вне её |
 
-Плейсхолдеры в `.tmpl` (`${CDN_DOMAIN}`, `${XHTTP_PATH}`, `${XHTTP_PORT}`) заполняются скриптом из `.env`. `host-xhttp-extra.json` статичный.
+Плейсхолдеры в `.tmpl` (`${CDN_DOMAIN}`, `${XHTTP_PATH}`, `${XHTTP_PORT}`, `${HY2_DOMAIN}`, `${REALITY_SNI}`, `${REALITY_PRIVATE_KEY}`, `${REALITY_SHORT_ID}`) заполняются скриптом из `.env`. Reality попадает в профиль при заданном `REALITY_SNI`, Hysteria2 при заданном `HY2_DOMAIN`. `host-xhttp-extra.json` статичный.
 
 ## Синхронизация (обязательно)
 
