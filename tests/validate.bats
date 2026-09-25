@@ -83,6 +83,31 @@ EOF
   stub timeout <<'EOF'
 [ -e "$STUB_DIR/xray-up" ]
 EOF
+  # The wait for xray on the node takes no time; xray comes up during it on request.
+  stub sleep <<'EOF'
+echo "sleep $*" >>"$STUB_DIR/calls"
+[ -e "$STUB_DIR/xray-comes-up" ] && touch "$STUB_DIR/xray-up"
+exit 0
+EOF
+}
+
+# node_container STATE [MOUNTS]: a docker whose remnanode container is in STATE with MOUNTS; its log
+# is $TMP/node-log.
+node_container() {
+  echo "$1" >"$TMP/node-state"
+  echo "${2-}" >"$TMP/node-mounts"
+  stub docker <<'EOF'
+case "$1" in
+  inspect)
+    case "$*" in
+      *State.Status*) cat "$STUB_DIR/node-state" ;;
+      *Mounts*) cat "$STUB_DIR/node-mounts" ;;
+    esac
+    ;;
+  logs) [ -f "$STUB_DIR/node-log" ] && cat "$STUB_DIR/node-log" ;;
+esac
+exit 0
+EOF
 }
 
 # Counts logged calls that match the pattern; 0 when nothing ran at all.
@@ -118,8 +143,68 @@ calls() {
   rm "$TMP/xray-up"
   run validate::layers
   [ "$status" -eq 8 ]
-  [[ "$output" == *"layer 1 (xray) failed: nothing listens on 127.0.0.1:4443: no node runs the VLESS-XHTTP-CDN-NODE1 inbound yet. Do panel steps 1 and 2 above"* ]]
+  [[ "$output" == *"layer 1 (xray) failed: nothing listens on 127.0.0.1:4443: no node runs here yet (no Docker): create it in the panel (steps 1 and 2 above), give ./deploy.sh its SECRET_KEY there or as NODE_SECRET_KEY in .env, rerun ./deploy.sh"* ]]
   [ "$(calls 'https://')" -eq 0 ]
+  # Docker without the node container.
+  stub docker <<'EOF'
+exit 1
+EOF
+  run validate::layers
+  [ "$status" -eq 8 ]
+  [[ "$output" == *"no node runs here yet (no remnanode container)"* ]]
+  [[ "$output" != *waiting* ]]
+}
+
+@test "layer 1 gives a running node time to start xray and passes once it listens" {
+  rm "$TMP/xray-up"
+  touch "$TMP/xray-comes-up"
+  node_container running
+  run validate::layers
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"waiting up to 60s for xray on the node to open 127.0.0.1:4443"* ]]
+  [[ "$output" == *"layer 1 (xray): 127.0.0.1:4443 accepts connections"* ]]
+  [ "$(calls '^sleep 2$')" -eq 1 ]
+}
+
+@test "layer 1 names a node that does not see the Hysteria2 certificate" {
+  rm "$TMP/xray-up"
+  node_container running ""
+  HY2_DOMAIN=hy2.example.com CDN_DEPLOY_NODE_WAIT=0 run validate::layers
+  [ "$status" -eq 8 ]
+  [[ "$output" == *"nothing listens on 127.0.0.1:4443: the remnanode container does not see /etc/letsencrypt, so xray stops on the Hysteria2 certificate: rerun ./deploy.sh, it rewrites /opt/remnanode/docker-compose.yml with the volume /etc/letsencrypt:/etc/letsencrypt:ro"* ]]
+}
+
+@test "layer 1 quotes the cause of a failed xray start from the node log and stops waiting" {
+  rm "$TMP/xray-up"
+  node_container running "/etc/letsencrypt "
+  printf '\e[31m[Nest] 42  - 09/26/2026, 1:00:00 AM   ERROR\e[39m [XrayService] Failed to start Xray: Xray Core process is not running anymore (s6: down (exitcode 23) 0 seconds, ready 0 seconds) · Failed to start: main: failed to load config files: [@rwint:/internal/get-config?token=x] > infra/conf: failed to build inbound config with tag HYSTERIA2-NODE1 > infra/conf: Failed to build TLS config. > infra/conf: failed to parse certificate > open /etc/letsencrypt/live/hy2.example.com/fullchain.pem: no such file or directory\n' >"$TMP/node-log"
+  HY2_DOMAIN=hy2.example.com run validate::layers
+  [ "$status" -eq 8 ]
+  [[ "$output" == *"nothing listens on 127.0.0.1:4443: xray on the node fails: open /etc/letsencrypt/live/hy2.example.com/fullchain.pem: no such file or directory (docker logs remnanode)"* ]]
+  [ "$(calls '^sleep')" -eq 1 ]
+}
+
+@test "layer 1 says when the node rejects its SECRET_KEY, and when its container is down" {
+  rm "$TMP/xray-up"
+  node_container restarting
+  echo 'Error: SECRET_KEY payload validation failed. Double check your SECRET_KEY.' >"$TMP/node-log"
+  run validate::layers
+  [ "$status" -eq 8 ]
+  [[ "$output" == *"the node rejects its SECRET_KEY (docker logs remnanode): copy it again from the panel into NODE_SECRET_KEY in .env, rerun ./deploy.sh"* ]]
+  rm "$TMP/node-log"
+  node_container exited
+  run validate::layers
+  [ "$status" -eq 8 ]
+  [[ "$output" == *"the remnanode container is exited: docker logs remnanode says why"* ]]
+}
+
+@test "layer 1 sends a running node without the inbound to the panel" {
+  rm "$TMP/xray-up"
+  node_container running
+  echo '[Nest] 42  - LOG [NodeService] SECRET_KEY OK' >"$TMP/node-log"
+  CDN_DEPLOY_NODE_WAIT=0 run validate::layers
+  [ "$status" -eq 8 ]
+  [[ "$output" == *"the node runs, but xray has no VLESS-XHTTP-CDN-NODE1: check in the panel that the node is online (the panel reaches NODE_PORT 2222) with this inbound on, rerun ./deploy.sh"* ]]
 }
 
 @test "layer 1 warns when xray also listens beyond the loopback" {

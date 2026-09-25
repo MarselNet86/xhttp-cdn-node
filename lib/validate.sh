@@ -7,6 +7,8 @@ set -euo pipefail
 
 # shellcheck source=common.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
+# shellcheck source=node.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/node.sh"
 
 validate::layers() {
   require::cmd curl jq openssl
@@ -21,11 +23,12 @@ validate::layers() {
 
 # --- layers -----------------------------------------------------------------------------
 
-# Layer 1: the inbound that the panel pushed listens on the loopback.
+# Layer 1: the inbound that the panel pushed listens on the loopback. A node that runs here
+# gets time to start xray, and a failure names its cause.
 validate::_xray() {
   local addrs
-  if ! validate::_listening "$XHTTP_PORT"; then
-    validate::_fail 1 xray "nothing listens on 127.0.0.1:$XHTTP_PORT: no node runs the VLESS-XHTTP-CDN${NODE_NAME:+-${NODE_NAME^^}} inbound yet. Do panel steps 1 and 2 above (the profile from out/remnawave/config-profile.json, then the node with it), rerun ./deploy.sh"
+  if ! validate::_listening "$XHTTP_PORT" && ! validate::_wait_node; then
+    validate::_fail 1 xray "nothing listens on 127.0.0.1:$XHTTP_PORT: $(validate::_node_cause)"
   fi
   if command -v ss >/dev/null 2>&1; then
     addrs="$(ss -Hltn "sport = :$XHTTP_PORT" 2>/dev/null | awk '{print $4}' || true)"
@@ -123,6 +126,82 @@ validate::_fail() {
 
 validate::_listening() {
   timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/$1" 2>/dev/null
+}
+
+# The panel starts xray once it reaches a node, so a node container that runs here gets
+# CDN_DEPLOY_NODE_WAIT seconds (60; tests cut it) to open the port. A failure in its log
+# ends the wait.
+validate::_wait_node() {
+  local wait="${CDN_DEPLOY_NODE_WAIT:-60}" waited=0
+  if [[ "$(validate::_node_state)" != running ]]; then
+    return 1
+  fi
+  log::info "waiting up to ${wait}s for xray on the node to open 127.0.0.1:$XHTTP_PORT"
+  while ((waited < wait)); do
+    sleep 2
+    waited=$((waited + 2))
+    if validate::_listening "$XHTTP_PORT"; then
+      return 0
+    fi
+    if [[ -n "$(validate::_node_error)" ]]; then
+      return 1
+    fi
+  done
+  return 1
+}
+
+# Why no xray listens: no node here yet, a node that does not see the Hysteria2
+# certificate, an error in the node log, a stopped container, or a panel that has not
+# started the inbound.
+validate::_node_cause() {
+  local state error absent="no Docker" tag="VLESS-XHTTP-CDN${NODE_NAME:+-${NODE_NAME^^}}"
+  state="$(validate::_node_state)"
+  error="$(validate::_node_error)"
+  if command -v docker >/dev/null 2>&1; then
+    absent="no $NODE_CONTAINER container"
+  fi
+  if [[ -z "$state" ]]; then
+    printf 'no node runs here yet (%s): create it in the panel (steps 1 and 2 above), give ./deploy.sh its SECRET_KEY there or as NODE_SECRET_KEY in .env, rerun ./deploy.sh' \
+      "$absent"
+  elif [[ -n "${HY2_DOMAIN:-}" ]] &&
+    ! docker inspect -f '{{range .Mounts}}{{.Destination}} {{end}}' "$NODE_CONTAINER" 2>/dev/null | grep -qw /etc/letsencrypt; then
+    printf 'the %s container does not see /etc/letsencrypt, so xray stops on the Hysteria2 certificate: rerun ./deploy.sh, it rewrites %s with the volume /etc/letsencrypt:/etc/letsencrypt:ro' \
+      "$NODE_CONTAINER" "$NODE_COMPOSE"
+  elif [[ "$error" == *SECRET_KEY* ]]; then
+    printf 'the node rejects its SECRET_KEY (docker logs %s): copy it again from the panel into NODE_SECRET_KEY in .env, rerun ./deploy.sh' "$NODE_CONTAINER"
+  elif [[ -n "$error" ]]; then
+    printf 'xray on the node fails: %s (docker logs %s)' "$error" "$NODE_CONTAINER"
+  elif [[ "$state" != running ]]; then
+    printf 'the %s container is %s: docker logs %s says why' "$NODE_CONTAINER" "$state" "$NODE_CONTAINER"
+  else
+    printf 'the node runs, but xray has no %s: check in the panel that the node is online (the panel reaches NODE_PORT %s) with this inbound on, rerun ./deploy.sh' \
+      "$tag" "${NODE_PORT:-2222}"
+  fi
+}
+
+# The state of the node container (running, restarting, exited...), empty without one.
+validate::_node_state() {
+  if command -v docker >/dev/null 2>&1; then
+    docker inspect -f '{{.State.Status}}' "$NODE_CONTAINER" 2>/dev/null || true
+  fi
+}
+
+# The latest failure in the node log: a rejected SECRET_KEY, or the last link of the error
+# chain of a failed xray start ("... > open /etc/...: no such file or directory").
+validate::_node_error() {
+  local line
+  if ! command -v docker >/dev/null 2>&1; then
+    return 0
+  fi
+  line="$(docker logs --tail 200 "$NODE_CONTAINER" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' |
+    grep -E 'Failed to start Xray|SECRET_KEY (INVALID|payload|missing|contains)|Invalid SECRET_KEY' |
+    tail -n 1 || true)"
+  if [[ "$line" == *SECRET_KEY* ]]; then
+    printf 'SECRET_KEY rejected'
+  elif [[ -n "$line" ]]; then
+    line="${line#*Failed to start Xray: }"
+    printf '%s' "${line##* > }"
+  fi
 }
 
 # Headers of a GET, CR stripped; returns curl's exit code.
