@@ -206,14 +206,14 @@ is::port() {
 readonly -a ENV_KEYS=(
   VLESS_DOMAIN HY2_DOMAIN CDN_DOMAIN ORIGIN_IP XHTTP_PORT XHTTP_PATH NGINX_TLS_PORT
   CERT_MODE CF_API_TOKEN LE_EMAIL NODE_RELOAD_CMD ISSUE_CDN_ORIGIN_CERT
-  REALITY_SNI REALITY_PRIVATE_KEY REALITY_SHORT_ID NODE_NAME
+  REALITY_SNI REALITY_PRIVATE_KEY REALITY_SHORT_ID NODE_NAME NODE_PORT NODE_SECRET_KEY
 )
 # Keys an older .env holds that nothing reads anymore. env::load skips them without a
 # warning, and the next write of .env drops them. UUID was a VLESS client id: the panel
 # creates the clients, each with an id of its own.
 readonly -a ENV_RETIRED_KEYS=(UUID)
 # Values that grant access to the DNS zone or the node: never print them.
-readonly -a ENV_SECRET_KEYS=(CF_API_TOKEN REALITY_PRIVATE_KEY)
+readonly -a ENV_SECRET_KEYS=(CF_API_TOKEN REALITY_PRIVATE_KEY NODE_SECRET_KEY)
 
 env::is_secret() { env::_contains "$1" "${ENV_SECRET_KEYS[@]}"; }
 
@@ -345,12 +345,15 @@ ui::field() {
 }
 
 # Ends the field of a hidden answer of LENGTH characters. On a terminal a dot stands for
-# each one, so a paste shows that it arrived.
+# each one, so a paste shows that it arrived; past 48, the length follows the dots.
 ui::hidden() {
-  local dots
+  local n="$1" dots
   if ((UI_STYLE)); then
-    printf -v dots '%*s' "$1" ''
+    printf -v dots '%*s' "$((n > 48 ? 48 : n))" ''
     printf '%s' "${dots// /$UI_DOT}" >&2
+    if ((n > 48)); then
+      printf ' %s%d characters%s' "$UI_DIM" "$n" "$UI_RESET" >&2
+    fi
   fi
   printf '\n' >&2
 }

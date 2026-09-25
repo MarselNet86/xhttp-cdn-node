@@ -4,6 +4,12 @@
 
 set -euo pipefail
 
+# Modules may source this file again; readonly constants must not be redefined.
+if [[ -n "${_CDN_PROMPT_LOADED:-}" ]]; then
+  return 0
+fi
+_CDN_PROMPT_LOADED=1
+
 # shellcheck source=common.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 
@@ -39,6 +45,8 @@ prompt::collect() {
 prompt::_asks() {
   local key="$1" pending=" ${2-} " by
   case "$key" in
+    # Panel step 2 asks for them: the panel creates the node from the rendered profile.
+    NODE_PORT | NODE_SECRET_KEY) return 1 ;;
     CF_API_TOKEN | ISSUE_CDN_ORIGIN_CERT) by=CERT_MODE ;;
     NODE_RELOAD_CMD) by=HY2_DOMAIN ;;
     REALITY_PRIVATE_KEY | REALITY_SHORT_ID) by=REALITY_SNI ;;
@@ -170,6 +178,16 @@ prompt::validate() {
       [[ "$value" =~ ^[a-z0-9]([a-z0-9-]{0,14}[a-z0-9])?$ ]] ||
         reason="expected a short name like de1: up to 16 letters, digits and inner -$(prompt::_foreign_chars "$value" a-z0-9-)"
       ;;
+    NODE_PORT)
+      if ! is::port "$value"; then
+        reason="expected a port from 1 to 65535, NODE_PORT in the docker-compose.yml of the panel"
+      elif [[ "$value" == 443 || "$value" == "${XHTTP_PORT:-}" || "$value" == "${NGINX_TLS_PORT:-}" ]]; then
+        reason="must differ from 443, XHTTP_PORT and NGINX_TLS_PORT: xray and nginx listen there"
+      fi
+      ;;
+    NODE_SECRET_KEY)
+      reason="$(prompt::_node_key_problem "$value")"
+      ;;
     *) reason="$key is not in the .env contract" ;;
   esac
   if [[ -n "$reason" ]]; then
@@ -178,7 +196,26 @@ prompt::validate() {
   fi
 }
 
-# Lowercases the case-insensitive values; "-" clears the optional ones.
+# What is wrong with a SECRET_KEY, if anything. The node takes base64 of a JSON object with
+# four PEM strings (remnawave/node 3.4 checks the same), so a cut or mangled paste shows up
+# here and not in the node log. A terminal line holds 4095 characters.
+prompt::_node_key_problem() {
+  local value="$1"
+  if [[ -z "$value" ]]; then
+    echo "nothing entered: copy SECRET_KEY from the docker-compose.yml that the panel shows for the node"
+  elif ((${#value} >= 4095)); then
+    echo "the terminal cut the paste at 4095 characters: put NODE_SECRET_KEY into $ENV_FILE by hand"
+  elif [[ ! "$value" =~ ^[A-Za-z0-9+/]+=*$ ]]; then
+    echo "expected SECRET_KEY from the panel: base64, letters, digits, + and /$(prompt::_foreign_chars "$value" 'A-Za-z0-9+/=')"
+  elif ! base64 -d <<<"$value" 2>/dev/null |
+    jq -e 'type == "object" and ([.caCertPem, .jwtPublicKey, .nodeCertPem, .nodeKeyPem] | all(type == "string"))' \
+      >/dev/null 2>&1; then
+    echo "it does not decode to the node certificates (caCertPem, jwtPublicKey, nodeCertPem, nodeKeyPem): copy the whole value from the panel"
+  fi
+}
+
+# Lowercases the case-insensitive values; "-" clears the optional ones. A SECRET_KEY
+# pasted with its line from docker-compose.yml keeps only the value.
 prompt::_normalize() {
   local key="$1" value="$2"
   case "$key" in
@@ -186,6 +223,16 @@ prompt::_normalize() {
       if [[ "$value" == - ]]; then
         value=""
       fi
+      ;;
+    NODE_SECRET_KEY)
+      value="$(prompt::_trim "${value#-}")"
+      if [[ "$value" == SECRET_KEY* ]]; then
+        value="$(prompt::_trim "${value#SECRET_KEY}")"
+        value="$(prompt::_trim "${value#[=:]}")"
+      fi
+      case "$value" in
+        \"*\" | \'*\') value="${value:1:${#value}-2}" ;;
+      esac
       ;;
   esac
   case "$key" in
@@ -267,6 +314,8 @@ prompt::_question() {
     REALITY_PRIVATE_KEY) echo "Reality x25519 private key|input hidden" ;;
     REALITY_SHORT_ID) echo "Reality short id|hex" ;;
     NODE_NAME) echo "Short name of this node for the panel|the inbound tags end with it, de1 gives VLESS-REALITY-DE1: the panel wants every tag unique" ;;
+    NODE_PORT) echo "NODE_PORT of the node|from the same docker-compose.yml; the panel connects to the node on it" ;;
+    NODE_SECRET_KEY) echo "SECRET_KEY of the node|from the docker-compose.yml that the panel shows; input hidden: paste the value or its whole line" ;;
   esac
 }
 
@@ -371,6 +420,24 @@ prompt::_new_reality_key() {
 
 prompt::_new_short_id() {
   head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n'
+}
+
+# Panel step 2: SECRET_KEY and NODE_PORT of the node that the panel has just created, from
+# the docker-compose.yml it shows. Asked once and kept in .env. SECRET and PORT, the values
+# of a compose file set up by hand, are the defaults, and input that has ended takes them.
+# Returns 1 when no key comes from anywhere.
+prompt::node() {
+  local secret="$1" port="${2:-}"
+  if [[ -n "${NODE_SECRET_KEY:-}" ]]; then
+    return 0
+  fi
+  if [[ -z "$secret" && ! -t 0 ]]; then
+    return 1
+  fi
+  UI_NUMBER=""
+  prompt::_ask NODE_SECRET_KEY "$secret" "${secret:+from docker-compose.yml}"
+  prompt::_ask NODE_PORT "${port:-${NODE_PORT:-}}"
+  prompt::_write_env
 }
 
 # Without a name in .env, the first label of VLESS_DOMAIN names the node, else the host.

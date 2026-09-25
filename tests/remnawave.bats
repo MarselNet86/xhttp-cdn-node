@@ -7,9 +7,14 @@ setup() {
   # bats 1.2 on Ubuntu 22.04 has no BATS_TEST_TMPDIR.
   TMP="$(mktemp -d)"
   REPO="$TMP/repo"
-  mkdir -p "$REPO"
+  mkdir -p "$REPO" "$TMP/stubs" "$TMP/root"
   cp -R "$BATS_TEST_DIRNAME/../lib" "$BATS_TEST_DIRNAME/../remnawave" \
     "$BATS_TEST_DIRNAME/../.env.example" "$REPO/"
+  # The node of step 2 lands under the scratch root; docker records its calls.
+  export CDN_DEPLOY_SYSROOT="$TMP/root"
+  printf '#!/bin/sh\necho "docker $*" >>"%s/calls"\n' "$TMP" >"$TMP/stubs/docker"
+  chmod +x "$TMP/stubs/docker"
+  PATH="$TMP/stubs:$PATH"
   # shellcheck source=../lib/remnawave.sh
   source "$REPO/lib/remnawave.sh"
   export CDN_DOMAIN=cdn.example.com XHTTP_PATH=/api/v2.jpg/ XHTTP_PORT=4443 NODE_NAME=node1
@@ -22,13 +27,19 @@ teardown() {
 
 # Emits with stdout only in $output; stderr goes to $TMP/stderr.
 emit() {
-  run bash -c 'source "$1" && remnawave::emit 2>"$2"' _ "$REPO/lib/remnawave.sh" "$TMP/stderr"
+  run bash -c 'source "$1" && remnawave::emit 2>"$2" </dev/null' _ "$REPO/lib/remnawave.sh" "$TMP/stderr"
 }
 
 # Emits as a terminal session would: remnawave::_interactive holds, stdin answers Enter.
 emit_in_terminal() {
   run bash -c 'source "$1" && remnawave::_interactive() { return 0; } &&
     remnawave::emit 2>"$2" <<<"$(printf "\n%.0s" 1 2 3 4 5 6)"' _ "$REPO/lib/remnawave.sh" "$TMP/stderr"
+}
+
+# A SECRET_KEY of the shape the node checks, with stand-in certificates.
+node_key() {
+  printf '{"caCertPem":"ca","jwtPublicKey":"jwt","nodeCertPem":"cert","nodeKeyPem":"key"}' |
+    base64 | tr -d '\n'
 }
 
 full_node() {
@@ -94,21 +105,48 @@ host_extra() {
   [[ "$output" != *$'\e['* ]]
 }
 
-@test "the node comes after the profile: the panel creates it with the profile, its compose file starts it here" {
+@test "the node comes after the profile: the panel creates it from the profile, ./deploy.sh runs it here" {
   local step1 step2
   full_node
   emit
   [ "$status" -eq 0 ]
   step1="$(sed -n '/^  1\. /,/^  2\. /p' <<<"$output")"
   step2="$(sed -n '/^  2\. /,/^  3\. /p' <<<"$output")"
-  [[ "$step2" == *"New node: Nodes -> Management -> Create node, address 203.0.113.10; on the last step choose the profile from step 1 with all its inbounds -> Copy docker-compose.yml -> Create node."* ]]
-  [[ "$step2" == *"On this server: the file goes to /opt/remnanode/docker-compose.yml, then cd /opt/remnanode && docker compose up -d."* ]]
+  [[ "$step2" == *"New node: Nodes -> Management -> Create node, address 203.0.113.10; on the last step choose the profile from step 1 with all its inbounds -> Create node."* ]]
+  [[ "$step2" == *"The panel then shows docker-compose.yml: ./deploy.sh takes its SECRET_KEY and NODE_PORT once, keeps them in .env and runs the node from /opt/remnanode/docker-compose.yml, installing Docker when it is missing."* ]]
   [[ "$step2" == *"A node already in the panel: the node card -> Change Profile -> the profile from step 1"* ]]
   [[ "$step1" != *docker-compose* ]]
-  # The volume has to be in the compose file before its first start.
-  [ "$(grep -n 'add the volume /etc/letsencrypt:/etc/letsencrypt:ro' <<<"$step2" | cut -d: -f1)" -lt \
-    "$(grep -n 'docker compose up -d. No Docker' <<<"$step2" | cut -d: -f1)" ]
-  [[ "$step2" == *"HYSTERIA2 reads /etc/letsencrypt/live/hy2.example.com/ inside the node container"* ]]
+  # Without a key and a terminal the node waits, and the guide says where the key goes.
+  [[ "$(cat "$TMP/stderr")" == *"no SECRET_KEY for the node: put SECRET_KEY and NODE_PORT from the docker-compose.yml that the panel shows into $REPO/.env as NODE_SECRET_KEY and NODE_PORT, rerun ./deploy.sh"* ]]
+  [ ! -e "$TMP/calls" ]
+}
+
+@test "with NODE_SECRET_KEY step 2 writes the compose file with the Hysteria2 volume and starts the node" {
+  local compose="$TMP/root/opt/remnanode/docker-compose.yml"
+  full_node
+  NODE_SECRET_KEY="$(node_key)" NODE_PORT=2222 emit
+  [ "$status" -eq 0 ]
+  grep -qx '      - /etc/letsencrypt:/etc/letsencrypt:ro' "$compose"
+  grep -qx "docker compose -f $compose up -d" "$TMP/calls"
+  [[ "$(cat "$TMP/stderr")" != *"no SECRET_KEY"* ]]
+  [[ "$output $(cat "$TMP/stderr")" != *"$(node_key)"* ]]
+}
+
+@test "a node set up by hand hands over its SECRET_KEY and NODE_PORT and gets the Hysteria2 volume" {
+  local compose="$TMP/root/opt/remnanode/docker-compose.yml" key
+  key="$(node_key)"
+  full_node
+  mkdir -p "${compose%/*}"
+  printf 'services:\n  remnanode:\n    environment:\n      - NODE_PORT=3333\n      - SECRET_KEY="%s"\n' \
+    "$key" >"$compose"
+  emit
+  [ "$status" -eq 0 ]
+  env::load "$REPO/.env"
+  [ "$NODE_SECRET_KEY" = "$key" ]
+  [ "$NODE_PORT" = 3333 ]
+  grep -qx '      - NODE_PORT=3333' "$compose"
+  grep -qx '      - /etc/letsencrypt:/etc/letsencrypt:ro' "$compose"
+  [ -e "$compose.cdn-deploy-orig" ]
 }
 
 @test "the config profile carries Reality, the xhttp inbound and Hysteria2 for the node's domains" {
@@ -168,7 +206,8 @@ host_extra() {
   full_node
   emit_in_terminal
   [ "$status" -eq 0 ]
-  [ "$(grep -o 'Press Enter when done' "$TMP/stderr" | wc -l)" -eq 6 ]
+  # Step 2 asks for the node key instead.
+  [ "$(grep -o 'Press Enter when done' "$TMP/stderr" | wc -l)" -eq 5 ]
   emit_in_terminal
   [ "$status" -eq 0 ]
   [ "$(grep -c 'Press Enter when done' "$TMP/stderr")" -eq 0 ]

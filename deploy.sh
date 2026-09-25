@@ -13,6 +13,8 @@ source "$REPO_ROOT/lib/certs.sh"
 source "$REPO_ROOT/lib/nginx.sh"
 # shellcheck source=lib/sysctl.sh
 source "$REPO_ROOT/lib/sysctl.sh"
+# shellcheck source=lib/node.sh
+source "$REPO_ROOT/lib/node.sh"
 # shellcheck source=lib/remnawave.sh
 source "$REPO_ROOT/lib/remnawave.sh"
 # shellcheck source=lib/validate.sh
@@ -164,7 +166,8 @@ deploy::describe() {
         "$tls_port" "$cdn" "$(deploy::origin_cert_domain)" "$xhttp_port" "sites-enabled/default"
       ;;
     remnawave)
-      printf 'render out/remnawave/: config profile, host extra, Xray JSON template, xhttp inbound; walk through the panel (the profile, then the node with it) and the CDN resource'
+      printf 'render out/remnawave/: config profile, host extra, Xray JSON template, xhttp inbound; walk through the panel (the profile, then the node with it) and the CDN resource; start the node from %s with its SECRET_KEY%s, installing Docker when it is missing' \
+        "$NODE_COMPOSE" "$([[ -n "${HY2_DOMAIN:-}" ]] && printf ' and /etc/letsencrypt mounted for Hysteria2')"
       ;;
     validate)
       printf 'layers: xray 127.0.0.1:%s; origin :%s /cdn-check 204; %stest 400 with padding; CDN %s /cdn-check 204' \

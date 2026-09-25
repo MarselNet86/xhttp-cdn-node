@@ -58,6 +58,9 @@ step_line() {
   has_line '^ +NGINX_TLS_PORT +8444$'
   has_line '^ +CERT_MODE +dns-cloudflare$'
   has_line 'nginx .*:8444 <CDN_DOMAIN> \(certificate of <CDN_DOMAIN>\) -> 127\.0\.0\.1:4443'
+  has_line '^ +NODE_PORT +2222$'
+  has_line '^ +NODE_SECRET_KEY +<unset>$'
+  has_line 'remnawave .*start the node from /opt/remnanode/docker-compose\.yml with its SECRET_KEY, installing Docker'
 }
 
 @test "--dry-run changes nothing" {
@@ -80,6 +83,7 @@ ORIGIN_IP=203.0.113.10
 XHTTP_PORT=4450
 CF_API_TOKEN=tok-7f3a9
 REALITY_PRIVATE_KEY=c3ludGhldGljLXJlYWxpdHkta2V5LWZvci10ZXN0cyE
+NODE_SECRET_KEY=bm9kZS1zZWNyZXQtZm9yLXRlc3Rz
 EOF
   chmod 600 "$REPO/.env"
   deploy --dry-run
@@ -87,10 +91,13 @@ EOF
   has_line '^ +VLESS_DOMAIN +vless\.example\.com$'
   has_line '^ +CF_API_TOKEN +<hidden>$'
   has_line '^ +REALITY_PRIVATE_KEY +<hidden>$'
+  has_line '^ +NODE_SECRET_KEY +<hidden>$'
+  has_line 'remnawave .*with its SECRET_KEY and /etc/letsencrypt mounted for Hysteria2'
   has_line 'certs .*vless\.example\.com hy2\.example\.com cdn\.example\.com'
   has_line 'nginx .*:8444 cdn\.example\.com \(certificate of cdn\.example\.com\) -> 127\.0\.0\.1:4450'
   [[ "$output $(cat "$TMP/stderr")" != *tok-7f3a9* ]]
   [[ "$output $(cat "$TMP/stderr")" != *c3ludGhldGljLXJl* ]]
+  [[ "$output $(cat "$TMP/stderr")" != *bm9kZS1zZWNyZXQ* ]]
 }
 
 @test "--dry-run plans no CDN certificate under http-01 or ISSUE_CDN_ORIGIN_CERT=false" {

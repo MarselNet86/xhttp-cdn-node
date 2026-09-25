@@ -1,13 +1,17 @@
 # shellcheck shell=bash
 # Files for the Remnawave panel (tech.md §5, §6): renders remnawave/ into out/remnawave/
 # for this node's domains, then walks the operator through the panel and the CDN resource.
-# The panel manages xray on the node, so nothing here touches the system or the node: the
-# operator pastes the files by hand.
+# The panel manages xray on the node: the operator pastes the files by hand. At panel step
+# 2 the node that the panel created starts on this server (lib/node.sh).
 
 set -euo pipefail
 
 # shellcheck source=common.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
+# shellcheck source=prompt.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/prompt.sh"
+# shellcheck source=node.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/node.sh"
 
 # Fields that must match one for one between the inbound and the host extra, or the tunnel
 # breaks exactly through the CDN (remnawave/README.md).
@@ -147,12 +151,13 @@ remnawave::_guide() {
     "Config Profiles -> Create Config Profile -> the name $tag -> paste $out/config-profile.json -> Save." \
     "Inbounds: $inbounds." \
     "The node keeps a profile of its own? Put only $out/inbound-xhttp-cdn.json into its \"inbounds\"."
-  # The panel asks for the profile when it creates a node, so the node comes second.
-  remnawave::_step "Node" \
-    "New node: Nodes -> Management -> Create node, address ${ORIGIN_IP:-<IP of this server>}; on the last step choose the profile from step 1 with all its inbounds -> Copy docker-compose.yml -> Create node." \
-    "${HY2_DOMAIN:+HYSTERIA2 reads /etc/letsencrypt/live/$HY2_DOMAIN/ inside the node container: add the volume /etc/letsencrypt:/etc/letsencrypt:ro to the service in docker-compose.yml; a running node takes it with docker compose up -d.}" \
-    "On this server: the file goes to /opt/remnanode/docker-compose.yml, then cd /opt/remnanode && docker compose up -d. No Docker yet: curl -fsSL https://get.docker.com | sh first." \
+  # The panel asks for the profile when it creates a node, so the node comes second. Its
+  # questions take the place of the wait.
+  remnawave::_print "Node" \
+    "New node: Nodes -> Management -> Create node, address ${ORIGIN_IP:-<IP of this server>}; on the last step choose the profile from step 1 with all its inbounds -> Create node." \
+    "The panel then shows docker-compose.yml: ./deploy.sh takes its SECRET_KEY and NODE_PORT once, keeps them in .env and runs the node from $NODE_COMPOSE, installing Docker when it is missing." \
     "A node already in the panel: the node card -> Change Profile -> the profile from step 1 with all its inbounds."
+  remnawave::_node
   remnawave::_step "Internal squad" \
     "Internal Squads -> the squad of your users (Default-Squad) -> turn the new inbounds on -> Save."
   remnawave::_step "Subscription template" \
@@ -166,8 +171,17 @@ remnawave::_guide() {
   printf '\nObfuscation fields stay identical in the inbound and the host extra (remnawave/README.md).\n'
 }
 
-# Prints step TITLE with its LINEs (empty ones skipped), then waits per remnawave::_guide.
+# Prints a step, then waits per remnawave::_guide.
 remnawave::_step() {
+  remnawave::_print "$@"
+  if ((pause > 0)) && remnawave::_interactive; then
+    printf '     %sPress Enter when done.%s ' "$UI_DIM" "$UI_RESET" >&2
+    read -r _ || true
+  fi
+}
+
+# Prints step TITLE with its LINEs, skipping the empty ones.
+remnawave::_print() {
   local title="$1" line
   shift
   step=$((step + 1))
@@ -177,9 +191,15 @@ remnawave::_step() {
       printf '     %s\n' "$line"
     fi
   done
-  if ((pause > 0)) && remnawave::_interactive; then
-    printf '     %sPress Enter when done.%s ' "$UI_DIM" "$UI_RESET" >&2
-    read -r _ || true
+}
+
+# Starts the node of step 2 on this server. Without a SECRET_KEY from .env, from the
+# compose file of a node set up by hand or from the terminal, the node waits for one.
+remnawave::_node() {
+  if prompt::node "$(node::compose_value SECRET_KEY)" "$(node::compose_value NODE_PORT)"; then
+    node::install
+  else
+    log::warn "no SECRET_KEY for the node: put SECRET_KEY and NODE_PORT from the docker-compose.yml that the panel shows into $ENV_FILE as NODE_SECRET_KEY and NODE_PORT, rerun ./deploy.sh"
   fi
 }
 

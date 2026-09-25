@@ -354,6 +354,9 @@ EOF
   [ "$output" = $'\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2' ]
   run ui::hidden 0
   [ "$output" = "" ]
+  # A long secret gets 48 dots and its length.
+  run ui::hidden 3000
+  [ "$output" = "$(printf '\xe2\x80\xa2%.0s' {1..48}) $(printf '\e[2m3000 characters\e[0m')" ]
   # The font of the Linux console has no bullet.
   TERM=linux ui::enable
   run ui::hidden 3
@@ -384,8 +387,9 @@ EOF
   [ "$NODE_RELOAD_CMD" = "docker restart remnanode" ]
   [ "$ISSUE_CDN_ORIGIN_CERT" = true ]
   [ "$REALITY_SNI" = www.swiss.com ]
+  [ "$NODE_PORT" = 2222 ]
   for key in VLESS_DOMAIN HY2_DOMAIN CDN_DOMAIN ORIGIN_IP CF_API_TOKEN LE_EMAIL \
-    REALITY_PRIVATE_KEY REALITY_SHORT_ID NODE_NAME; do
+    REALITY_PRIVATE_KEY REALITY_SHORT_ID NODE_NAME NODE_SECRET_KEY; do
     [ -z "${!key}" ] || {
       echo "$key must have no default"
       return 1

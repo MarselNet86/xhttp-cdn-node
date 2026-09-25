@@ -42,6 +42,12 @@ mode_600() {
   [ -n "$(find "$ENV_FILE" -perm 600)" ]
 }
 
+# A SECRET_KEY of the shape the node checks, with stand-in certificates.
+node_key() {
+  printf '{"caCertPem":"ca","jwtPublicKey":"jwt","nodeCertPem":"cert","nodeKeyPem":"key"}' |
+    base64 | tr -d '\n'
+}
+
 valid() {
   local key="$1" value
   shift
@@ -508,6 +514,66 @@ EOF
   invalid REALITY_PRIVATE_KEY "" short "c3ludGhldGljLXJlYWxpdHkta2V5LWZvci10ZXN0c+E"
   valid REALITY_SHORT_ID 1a2b3c4d5e6f7a8b ab
   invalid REALITY_SHORT_ID "" abc 1a2b3c4d5e6f7a8baa xyz0
+}
+
+@test "prompt::validate: the SECRET_KEY of the node decodes to its certificates" {
+  local key cut
+  key="$(node_key)"
+  valid NODE_SECRET_KEY "$key"
+  invalid NODE_SECRET_KEY "" "${key:0:40}" "$(printf 'not json' | base64)" \
+    "$(printf '{"caCertPem":"ca"}' | base64 | tr -d '\n')"
+  run prompt::validate NODE_SECRET_KEY ""
+  [ "$output" = "nothing entered: copy SECRET_KEY from the docker-compose.yml that the panel shows for the node" ]
+  run prompt::validate NODE_SECRET_KEY "${key}\$x"
+  [ "$output" = "expected SECRET_KEY from the panel: base64, letters, digits, + and /; it holds '\$' at $((${#key} + 1))" ]
+  printf -v cut '%4095s' ''
+  run prompt::validate NODE_SECRET_KEY "${cut// /A}"
+  [[ "$output" == "the terminal cut the paste at 4095 characters: put NODE_SECRET_KEY into "*"/.env by hand" ]]
+  run prompt::validate NODE_SECRET_KEY "$(printf '{"caCertPem":"ca"}' | base64 | tr -d '\n')"
+  [[ "$output" == "it does not decode to the node certificates (caCertPem, jwtPublicKey, nodeCertPem, nodeKeyPem)"* ]]
+}
+
+@test "prompt::validate: NODE_PORT stays off 443 and the ports of xray and nginx" {
+  XHTTP_PORT=4443
+  NGINX_TLS_PORT=8444
+  valid NODE_PORT 2222 1 65535
+  invalid NODE_PORT "" 0 65536 abc 443 4443 8444
+}
+
+@test "prompt::node asks nothing when .env holds the key, and gives up without key or terminal" {
+  NODE_SECRET_KEY="$(node_key)" run prompt::node "" ""
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e "$ENV_FILE" ]
+  NODE_SECRET_KEY="" run prompt::node "" "" </dev/null
+  [ "$status" -eq 1 ]
+  [ ! -e "$ENV_FILE" ]
+}
+
+@test "prompt::node takes the key and port of a compose file set up by hand once input ends" {
+  local key
+  key="$(node_key)"
+  env::load "$ENV_EXAMPLE"
+  run prompt::node "$key" 3333 </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"$key"* ]]
+  [[ "$output" == *"NODE_SECRET_KEY [from docker-compose.yml]:"* ]]
+  mode_600
+  env::load "$ENV_FILE"
+  [ "$NODE_SECRET_KEY" = "$key" ]
+  [ "$NODE_PORT" = 3333 ]
+}
+
+@test "a SECRET_KEY pasted with its whole line from docker-compose.yml keeps the value" {
+  local key
+  key="$(node_key)"
+  env::load "$ENV_EXAMPLE"
+  printf '      - SECRET_KEY="%s"\n\n' "$key" >"$TMP/answers"
+  run prompt::node "$(printf '{"caCertPem":"x","jwtPublicKey":"x","nodeCertPem":"x","nodeKeyPem":"x"}' | base64 | tr -d '\n')" "" <"$TMP/answers"
+  [ "$status" -eq 0 ]
+  env::load "$ENV_FILE"
+  [ "$NODE_SECRET_KEY" = "$key" ]
+  [ "$NODE_PORT" = 2222 ]
 }
 
 @test "prompt::validate: the node name is a short label that ends the inbound tags" {
