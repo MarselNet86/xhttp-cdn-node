@@ -161,6 +161,7 @@ invalid() {
   chmod +x "$TMP/bin/hostname"
   collect "" - cdn.example.com 203.0.113.10 "" "" "" "" tok-7f3a9 "" ""
   [ "$status" -eq 0 ]
+  [[ "$output" == *"NODE_NAME [edge-7]:"* ]]
   env::load "$ENV_FILE"
   [ "$NODE_NAME" = edge-7 ]
   rm "$ENV_FILE"
