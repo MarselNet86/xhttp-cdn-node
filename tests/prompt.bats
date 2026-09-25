@@ -94,11 +94,36 @@ invalid() {
   [ "$NGINX_TLS_PORT" = 8444 ]
   [ "$CERT_MODE" = dns-cloudflare ]
   [ -z "$LE_EMAIL" ]
-  [ "$NODE_RELOAD_CMD" = "docker restart remnawave-node" ]
+  [ "$NODE_RELOAD_CMD" = "docker restart remnanode" ]
   [ "$ISSUE_CDN_ORIGIN_CERT" = true ]
   [[ "$UUID" =~ $UUID_V4 ]]
   [[ "$shown" != *"$UUID"* ]]
   [[ "$shown" != *tok-7f3a9* ]]
+  [ "$REALITY_SNI" = www.swiss.com ]
+  [[ "$REALITY_PRIVATE_KEY" =~ ^[A-Za-z0-9_-]{43}$ ]]
+  [[ "$REALITY_SHORT_ID" =~ ^[0-9a-f]{16}$ ]]
+  [[ "$shown" != *"$REALITY_PRIVATE_KEY"* ]]
+}
+
+@test "the Reality keys stay across reruns, and - for REALITY_SNI skips them" {
+  local key sid
+  fresh
+  env::load "$ENV_FILE"
+  key="$REALITY_PRIVATE_KEY"
+  sid="$REALITY_SHORT_ID"
+  run prompt::collect </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"REALITY_PRIVATE_KEY [keep current]:"* ]]
+  env::load "$ENV_FILE"
+  [ "$REALITY_PRIVATE_KEY" = "$key" ]
+  [ "$REALITY_SHORT_ID" = "$sid" ]
+  rm "$ENV_FILE"
+  collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 \
+    "" "" "" "" "" tok-7f3a9 "" "" "" -
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"REALITY_PRIVATE_KEY"* ]]
+  env::load "$ENV_FILE"
+  [ -z "$REALITY_SNI" ]
 }
 
 @test "empty input repeats the question for CDN_DOMAIN, the only domain always required" {
@@ -125,7 +150,7 @@ invalid() {
 }
 
 @test "http-01 without a domain of this server asks for VLESS_DOMAIN again" {
-  collect "" "" cdn.example.com 203.0.113.10 "" "" "" "" http-01 "" vless.example.com
+  collect "" "" cdn.example.com 203.0.113.10 "" "" "" "" http-01 "" "" "" "" vless.example.com
   [ "$status" -eq 0 ]
   [[ "$output" == *"origin nginx needs a certificate: under http-01 or ISSUE_CDN_ORIGIN_CERT=false it comes from VLESS_DOMAIN"* ]]
   env::load "$ENV_FILE"
@@ -369,6 +394,15 @@ EOF
   invalid NODE_RELOAD_CMD "" "a 'b' \"c\""
   valid ISSUE_CDN_ORIGIN_CERT true false
   invalid ISSUE_CDN_ORIGIN_CERT "" yes TRUE 1
+}
+
+@test "prompt::validate: the Reality site, key and short id" {
+  valid REALITY_SNI www.swiss.com ""
+  invalid REALITY_SNI localhost "www.swiss.com:443"
+  valid REALITY_PRIVATE_KEY c3ludGhldGljLXJlYWxpdHkta2V5LWZvci10ZXN0cyE
+  invalid REALITY_PRIVATE_KEY "" short "c3ludGhldGljLXJlYWxpdHkta2V5LWZvci10ZXN0c+E"
+  valid REALITY_SHORT_ID 1a2b3c4d5e6f7a8b ab
+  invalid REALITY_SHORT_ID "" abc 1a2b3c4d5e6f7a8baa xyz0
 }
 
 @test "prompt::validate prints the reason and rejects keys outside the contract" {

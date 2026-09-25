@@ -22,6 +22,7 @@ prompt::collect() {
       CF_API_TOKEN) prompt::_ask_cf_token ;;
       NODE_RELOAD_CMD) prompt::_ask_node_reload ;;
       ISSUE_CDN_ORIGIN_CERT) prompt::_ask_issue_cdn_cert ;;
+      REALITY_PRIVATE_KEY | REALITY_SHORT_ID) prompt::_ask_reality "$key" ;;
       *) prompt::_ask "$key" ;;
     esac
   done
@@ -97,6 +98,19 @@ prompt::validate() {
     ISSUE_CDN_ORIGIN_CERT)
       [[ "$value" == true || "$value" == false ]] || reason="expected true or false"
       ;;
+    REALITY_SNI)
+      if [[ -n "$value" ]] && ! is::fqdn "$value"; then
+        reason="expected a domain name like www.swiss.com, or - for no Reality"
+      fi
+      ;;
+    REALITY_PRIVATE_KEY)
+      # 32 bytes in unpadded base64url, the form xray x25519 prints.
+      [[ "$value" =~ ^[A-Za-z0-9_-]{43}$ ]] ||
+        reason="expected an x25519 private key: 43 characters of base64url"
+      ;;
+    REALITY_SHORT_ID)
+      [[ "$value" =~ ^([0-9a-f]{2}){1,8}$ ]] || reason="expected 2 to 16 hex digits, an even count"
+      ;;
     *) reason="$key is not in the .env contract" ;;
   esac
   if [[ -n "$reason" ]]; then
@@ -109,14 +123,14 @@ prompt::validate() {
 prompt::_normalize() {
   local key="$1" value="$2"
   case "$key" in
-    VLESS_DOMAIN | HY2_DOMAIN | LE_EMAIL)
+    VLESS_DOMAIN | HY2_DOMAIN | LE_EMAIL | REALITY_SNI)
       if [[ "$value" == - ]]; then
         value=""
       fi
       ;;
   esac
   case "$key" in
-    *_DOMAIN | UUID | CERT_MODE) value="${value,,}" ;;
+    *_DOMAIN | UUID | CERT_MODE | REALITY_SNI | REALITY_SHORT_ID) value="${value,,}" ;;
   esac
   printf '%s' "$value"
 }
@@ -183,6 +197,9 @@ prompt::_question() {
     CF_API_TOKEN) echo "Cloudflare API token with Zone:DNS:Edit (input hidden)" ;;
     LE_EMAIL) echo "Let's Encrypt contact email, - for none" ;;
     NODE_RELOAD_CMD) echo "Command that restarts the node after a certificate renewal" ;;
+    REALITY_SNI) echo "Site that VLESS Reality impersonates: TLS 1.3, close to this server, open from Russia; - for no Reality" ;;
+    REALITY_PRIVATE_KEY) echo "Reality x25519 private key (input hidden)" ;;
+    REALITY_SHORT_ID) echo "Reality short id, hex" ;;
   esac
 }
 
@@ -232,6 +249,32 @@ prompt::_ask_node_reload() {
   if [[ -n "${HY2_DOMAIN:-}" ]]; then
     prompt::_ask NODE_RELOAD_CMD
   fi
+}
+
+# The Reality keys of the generated config profile. Without REALITY_SNI there is no
+# Reality inbound, and the current values stay as they are. Enter keeps the keys of an
+# existing .env, so a rerun does not break the clients; without them it takes new ones.
+prompt::_ask_reality() {
+  local key="$1"
+  if [[ -z "${REALITY_SNI:-}" ]]; then
+    return 0
+  fi
+  if [[ -n "${!key:-}" ]]; then
+    prompt::_ask "$key"
+  elif [[ "$key" == REALITY_PRIVATE_KEY ]]; then
+    prompt::_ask "$key" "$(prompt::_new_reality_key)" "new random"
+  else
+    prompt::_ask "$key" "$(prompt::_new_short_id)"
+  fi
+}
+
+# Any 32 random bytes make an x25519 private key: the curve clamps it on use.
+prompt::_new_reality_key() {
+  head -c 32 /dev/urandom | base64 | tr -d '\n=' | tr '+/' '-_'
+}
+
+prompt::_new_short_id() {
+  head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n'
 }
 
 # VLESS_DOMAIN may be skipped before CERT_MODE is known. When the answers leave origin

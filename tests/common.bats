@@ -315,9 +315,11 @@ EOF
   [ "$XHTTP_PATH" = /api/v2.jpg/ ]
   [ "$NGINX_TLS_PORT" = 8444 ]
   [ "$CERT_MODE" = dns-cloudflare ]
-  [ "$NODE_RELOAD_CMD" = "docker restart remnawave-node" ]
+  [ "$NODE_RELOAD_CMD" = "docker restart remnanode" ]
   [ "$ISSUE_CDN_ORIGIN_CERT" = true ]
-  for key in VLESS_DOMAIN HY2_DOMAIN CDN_DOMAIN ORIGIN_IP UUID CF_API_TOKEN LE_EMAIL; do
+  [ "$REALITY_SNI" = www.swiss.com ]
+  for key in VLESS_DOMAIN HY2_DOMAIN CDN_DOMAIN ORIGIN_IP UUID CF_API_TOKEN LE_EMAIL \
+    REALITY_PRIVATE_KEY REALITY_SHORT_ID; do
     [ -z "${!key}" ] || {
       echo "$key must have no default"
       return 1
