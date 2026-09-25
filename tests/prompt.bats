@@ -255,7 +255,7 @@ invalid() {
   [ ! -e "$ENV_FILE" ]
   collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 "" "" "" ""
   [ "$status" -eq 2 ]
-  [[ "$output" == *"CF_API_TOKEN: expected a Cloudflare API token"* ]]
+  [[ "$output" == *"CF_API_TOKEN: nothing entered: the input stays hidden"* ]]
   [ ! -e "$ENV_FILE" ]
 }
 
@@ -418,6 +418,16 @@ EOF
   [ "$output" = $'expected a domain name like www.swiss.com, or - for no Reality; it holds Cyrillic \xd1\x96 at 7' ]
   run prompt::validate VLESS_DOMAIN localhost
   [ "$output" = "expected a domain name like vless.example.com" ]
+}
+
+@test "a refused token says what arrived: nothing, or the characters that do not belong" {
+  run prompt::validate CF_API_TOKEN ""
+  [ "$status" -eq 1 ]
+  [ "$output" = "nothing entered: the input stays hidden, paste the token and press Enter" ]
+  run prompt::validate CF_API_TOKEN "tok en.x"
+  [ "$output" = "expected a Cloudflare API token: letters, digits, - and _; it holds a space at 4, '.' at 7" ]
+  run prompt::validate CF_API_TOKEN $'to\xd0\xba'
+  [ "$output" = $'expected a Cloudflare API token: letters, digits, - and _; it holds Cyrillic \xd0\xba at 3' ]
 }
 
 @test "prompt::validate: domains, with CDN_DOMAIN apart from the others" {

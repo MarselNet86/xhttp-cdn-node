@@ -129,9 +129,13 @@ prompt::validate() {
         reason="expected dns-cloudflare or http-01"
       ;;
     CF_API_TOKEN)
-      # Cloudflare tokens use the base64url alphabet; anything else is a paste error.
-      [[ "$value" =~ ^[A-Za-z0-9_-]+$ ]] ||
-        reason="expected a Cloudflare API token: letters, digits, - and _"
+      # Cloudflare tokens use the base64url alphabet; anything else is a paste error. The
+      # input is hidden, so the reason says what arrived.
+      if [[ -z "$value" ]]; then
+        reason="nothing entered: the input stays hidden, paste the token and press Enter"
+      elif [[ ! "$value" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        reason="expected a Cloudflare API token: letters, digits, - and _$(prompt::_foreign_chars "$value" A-Za-z0-9_-)"
+      fi
       ;;
     LE_EMAIL)
       if [[ -n "$value" ]] && ! prompt::_is_email "$value"; then
@@ -280,13 +284,14 @@ prompt::_trim() {
   printf '%s' "${s%"${s##*[![:space:]]}"}"
 }
 
-# Names the first characters of VALUE that a domain cannot hold, with their positions: a
-# Cyrillic letter that looks Latin, a typographic dash, a key typed as a control code.
+# Names the first characters of VALUE outside ALLOWED, a bracket expression that defaults
+# to the characters of a domain, with their positions: a Cyrillic letter that looks Latin,
+# a typographic dash, a key typed as a control code.
 prompt::_foreign_chars() {
-  local LC_ALL=C.UTF-8 s="$1" ch n i list="" found=0
+  local LC_ALL=C.UTF-8 s="$1" re="^[${2:-A-Za-z0-9.-}]$" ch n i list="" found=0
   for ((i = 0; i < ${#s} && found < 3; i++)); do
     ch="${s:i:1}"
-    if [[ "$ch" == [A-Za-z0-9.-] ]]; then
+    if [[ "$ch" =~ $re ]]; then
       continue
     fi
     printf -v n '%d' "'$ch"
