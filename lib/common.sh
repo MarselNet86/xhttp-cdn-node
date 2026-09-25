@@ -59,11 +59,12 @@ require::cmd() {
   done
 }
 
-# Supported targets (tech.md §2): Ubuntu 22.04/24.04, Debian 12; all use apt.
+# Supported targets (tech.md §2): Ubuntu 22.04/24.04, Debian 12; all use apt. Ubuntu
+# 26.04 joined later: the current LTS, whose default coreutils are the Rust uutils.
 # The optional argument replaces /etc/os-release for tests.
 require::distro() {
   local file="${1:-/etc/os-release}" id="" version="" key value
-  local need="need Ubuntu 22.04/24.04 or Debian 12"
+  local need="need Ubuntu 22.04/24.04/26.04 or Debian 12"
   [[ -r "$file" ]] || log::die "$EXIT_DISTRO" "cannot read $file: unsupported OS, $need"
   while IFS='=' read -r key value || [[ -n "$key" ]]; do
     if [[ "$value" =~ ^\"(.*)\"$ || "$value" =~ ^\'(.*)\'$ ]]; then
@@ -75,10 +76,10 @@ require::distro() {
     esac
   done <"$file"
   case "$id $version" in
-    "ubuntu 22.04" | "ubuntu 24.04" | "debian 12") ;;
+    "ubuntu 22.04" | "ubuntu 24.04" | "ubuntu 26.04" | "debian 12") ;;
     *) log::die "$EXIT_DISTRO" "unsupported OS: ${id:-unknown} ${version:-unknown}, $need" ;;
   esac
-  # The stack needs none of the recommended extras (checked on all three targets);
+  # The stack needs none of the recommended extras (checked on all four targets);
   # DEBIAN_FRONTEND keeps debconf from blocking on a question.
   # The lock timeout waits out unattended-upgrades, busy on a freshly booted VPS.
   export OS_ID="$id" OS_VERSION_ID="$version"

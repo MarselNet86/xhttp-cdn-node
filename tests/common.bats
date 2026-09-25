@@ -48,6 +48,11 @@ os_release() {
         'VERSION="24.04.5 LTS (Noble Numbat)"' 'VERSION_CODENAME=noble' 'ID=ubuntu' \
         'ID_LIKE=debian' 'UBUNTU_CODENAME=noble'
       ;;
+    ubuntu-26.04)
+      printf '%s\n' 'PRETTY_NAME="Ubuntu 26.04.1 LTS"' 'NAME="Ubuntu"' 'VERSION_ID="26.04"' \
+        'VERSION="26.04.1 LTS (Resolute Raccoon)"' 'VERSION_CODENAME=resolute' 'ID=ubuntu' \
+        'ID_LIKE=debian' 'UBUNTU_CODENAME=resolute'
+      ;;
     debian-12)
       printf '%s\n' 'PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"' 'NAME="Debian GNU/Linux"' \
         'VERSION_ID="12"' 'VERSION="12 (bookworm)"' 'VERSION_CODENAME=bookworm' 'ID=debian'
@@ -130,9 +135,9 @@ os_release() {
   fi
 }
 
-@test "require::distro accepts Ubuntu 22.04, 24.04, Debian 12 and exports PKG_INSTALL" {
+@test "require::distro accepts Ubuntu 22.04, 24.04, 26.04, Debian 12 and exports PKG_INSTALL" {
   local os
-  for os in ubuntu-22.04 ubuntu-24.04 debian-12; do
+  for os in ubuntu-22.04 ubuntu-24.04 ubuntu-26.04 debian-12; do
     os_release "$os"
     run require::distro "$TMP/os-release"
     [ "$status" -eq 0 ] || {
@@ -148,7 +153,7 @@ os_release() {
 
 @test "require::distro exits 5 on other systems or without os-release" {
   local spec
-  for spec in "ubuntu 20.04" "ubuntu 24.10" "debian 11" "debian 13" "fedora 40" \
+  for spec in "ubuntu 20.04" "ubuntu 24.10" "ubuntu 25.10" "debian 11" "debian 13" "fedora 40" \
     "linuxmint 21.3"; do
     printf 'ID=%s\nVERSION_ID="%s"\n' "${spec% *}" "${spec#* }" >"$TMP/os-release"
     run require::distro "$TMP/os-release"

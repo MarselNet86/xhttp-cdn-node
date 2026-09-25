@@ -142,7 +142,7 @@ deploy::describe() {
   xhttp_port="$(deploy::show XHTTP_PORT)"
   cdn="$(deploy::show CDN_DOMAIN)"
   case "$1" in
-    preflight) printf 'check root, bash 4+, OS: Ubuntu 22.04/24.04 or Debian 12' ;;
+    preflight) printf 'check root, bash 4+, OS: Ubuntu 22.04/24.04/26.04 or Debian 12' ;;
     input) printf 'ask for settings (defaults from an existing .env), write .env (mode 600)' ;;
     config) printf 'load .env over the .env.example defaults, check required settings' ;;
     packages) printf 'install missing: %s' "${PACKAGES[*]}" ;;
