@@ -165,6 +165,23 @@ has() {
   [ "$(grep -A1 -F 'location = /cdn/v1.bin {' "$SITE" | tail -n 1 | tr -s ' ')" = ' rewrite ^ /cdn/v1.bin/ last;' ]
 }
 
+@test "a CDN-only server names only CDN_DOMAIN and serves its certificate" {
+  VLESS_DOMAIN=""
+  run nginx::render
+  [ "$status" -eq 0 ]
+  has "$SITE" 'server_name cdn.example.com;'
+  has "$SITE" 'ssl_certificate /etc/letsencrypt/live/cdn.example.com/fullchain.pem;'
+}
+
+@test "without a certificate source for the origin, render exits 2 and changes nothing" {
+  VLESS_DOMAIN=""
+  CERT_MODE=http-01
+  run nginx::render
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"origin nginx needs a certificate: set VLESS_DOMAIN to a domain of this server"* ]]
+  [ ! -e "$SITE" ]
+}
+
 @test "the origin serves the CDN certificate when one is issued, the VLESS one otherwise" {
   run nginx::render
   [ "$status" -eq 0 ]

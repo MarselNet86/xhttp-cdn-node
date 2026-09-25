@@ -72,10 +72,11 @@ deploy::preflight() {
 deploy::load_config() {
   env::load "$ENV_EXAMPLE"
   env::load "$ENV_FILE"
-  env::require VLESS_DOMAIN HY2_DOMAIN CDN_DOMAIN ORIGIN_IP
+  env::require CDN_DOMAIN ORIGIN_IP
   if [[ "${CERT_MODE:-}" == dns-cloudflare ]]; then
     env::require CF_API_TOKEN
   fi
+  env::require_origin_cert
 }
 
 deploy::packages() { pkg::install "${PACKAGES[@]}"; }
@@ -118,6 +119,7 @@ deploy::plan() {
   else
     settings_from="no .env yet: .env.example defaults, step 2 asks for every value"
   fi
+  deploy::advise env::require_origin_cert
   printf 'cdn-deploy dry run: nothing is changed.\n\nSettings (%s):\n' "$settings_from"
   for key in "${ENV_KEYS[@]}"; do
     printf '  %-22s %s\n' "$key" "$(deploy::show "$key" '<unset>')"
@@ -151,8 +153,8 @@ deploy::describe() {
         "$(deploy::show CERT_MODE)" "$(deploy::cert_domains)"
       ;;
     renew-hook)
-      printf 'certbot deploy hook: nginx reload, "%s" when %s renews%s; certbot.timer on' \
-        "$(deploy::show NODE_RELOAD_CMD)" "$(deploy::show HY2_DOMAIN)" \
+      printf 'certbot deploy hook: nginx reload%s%s; certbot.timer on' \
+        "$(deploy::node_reload_plan)" \
         "$([[ "${CERT_MODE:-}" == http-01 ]] && printf '; pre/post hooks open :80 for HTTP-01')"
       ;;
     nginx)
@@ -167,20 +169,43 @@ deploy::describe() {
   esac
 }
 
+# Empty VLESS_DOMAIN and HY2_DOMAIN mean a server that already runs them: no certificate.
 deploy::cert_domains() {
-  printf '%s %s' "$(deploy::show VLESS_DOMAIN)" "$(deploy::show HY2_DOMAIN)"
+  local domains=()
+  if [[ -n "${VLESS_DOMAIN:-}" ]]; then
+    domains+=("$VLESS_DOMAIN")
+  fi
+  if [[ -n "${HY2_DOMAIN:-}" && "$HY2_DOMAIN" != "${VLESS_DOMAIN:-}" ]]; then
+    domains+=("$HY2_DOMAIN")
+  fi
   if env::cdn_has_cert; then
-    printf ' %s' "$(deploy::show CDN_DOMAIN)"
-  else
-    printf ' (origin :%s reuses the VLESS_DOMAIN certificate)' "$(deploy::show NGINX_TLS_PORT)"
+    domains+=("$(deploy::show CDN_DOMAIN)")
+  fi
+  if ((${#domains[@]} == 0)); then
+    domains=("<VLESS_DOMAIN>")
+  fi
+  printf '%s' "${domains[*]}"
+  if ! env::cdn_has_cert; then
+    printf ' (origin :%s serves the VLESS_DOMAIN certificate)' "$(deploy::show NGINX_TLS_PORT)"
   fi
 }
 
 deploy::origin_cert_domain() {
-  if env::cdn_has_cert; then
-    deploy::show CDN_DOMAIN
+  local domain
+  if domain="$(env::origin_cert_domain)" && [[ -n "$domain" ]]; then
+    printf '%s' "$domain"
+  elif env::cdn_has_cert; then
+    printf '<CDN_DOMAIN>'
   else
-    deploy::show VLESS_DOMAIN
+    printf '<VLESS_DOMAIN>'
+  fi
+}
+
+deploy::node_reload_plan() {
+  if [[ -n "${HY2_DOMAIN:-}" ]]; then
+    printf ', "%s" when %s renews' "$(deploy::show NODE_RELOAD_CMD)" "$HY2_DOMAIN"
+  else
+    printf ', no node restart: HY2_DOMAIN is not set'
   fi
 }
 

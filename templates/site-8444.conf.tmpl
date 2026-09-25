@@ -11,7 +11,7 @@ upstream xray_xhttp {
 
 server {
     listen ${NGINX_TLS_PORT} ssl backlog=4096;
-    server_name ${CDN_DOMAIN} ${VLESS_DOMAIN};
+    server_name ${SERVER_NAMES};
 
     ssl_certificate ${ORIGIN_CERT_DIR}/fullchain.pem;
     ssl_certificate_key ${ORIGIN_CERT_DIR}/privkey.pem;

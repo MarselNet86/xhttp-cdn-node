@@ -20,10 +20,12 @@ prompt::collect() {
       ORIGIN_IP) prompt::_ask_origin_ip ;;
       UUID) prompt::_ask_uuid ;;
       CF_API_TOKEN) prompt::_ask_cf_token ;;
+      NODE_RELOAD_CMD) prompt::_ask_node_reload ;;
       ISSUE_CDN_ORIGIN_CERT) prompt::_ask_issue_cdn_cert ;;
       *) prompt::_ask "$key" ;;
     esac
   done
+  prompt::_ask_origin_domain
   prompt::_write_env
 }
 
@@ -34,11 +36,19 @@ prompt::validate() {
   case "$key" in
     VLESS_DOMAIN | HY2_DOMAIN | CDN_DOMAIN)
       sample="${key%%_*}"
-      if ! is::fqdn "$value"; then
+      # VLESS and Hysteria2 are optional: a server that already runs them adds only the
+      # CDN. VLESS_DOMAIN stays required when the origin certificate has to come from it.
+      if [[ -z "$value" && "$key" != CDN_DOMAIN ]]; then
+        if [[ "$key" == VLESS_DOMAIN ]] && ! env::cdn_has_cert; then
+          reason="origin nginx needs a certificate for a domain of this server: under http-01 or ISSUE_CDN_ORIGIN_CERT=false it is VLESS_DOMAIN"
+        fi
+      elif ! is::fqdn "$value"; then
         reason="expected a domain name like ${sample,,}.example.com"
       elif [[ "$key" == CDN_DOMAIN &&
         ("$value" == "${VLESS_DOMAIN:-}" || "$value" == "${HY2_DOMAIN:-}") ]]; then
         reason="must differ from VLESS_DOMAIN and HY2_DOMAIN: it resolves to the CDN, they resolve to this server"
+      elif [[ "$key" != CDN_DOMAIN && "$value" == "${CDN_DOMAIN:-}" ]]; then
+        reason="must differ from CDN_DOMAIN: it resolves to this server, CDN_DOMAIN to the CDN"
       fi
       ;;
     ORIGIN_IP)
@@ -95,16 +105,18 @@ prompt::validate() {
   fi
 }
 
-# Lowercases the case-insensitive values; "-" clears LE_EMAIL.
+# Lowercases the case-insensitive values; "-" clears the optional ones.
 prompt::_normalize() {
   local key="$1" value="$2"
   case "$key" in
-    *_DOMAIN | UUID | CERT_MODE) value="${value,,}" ;;
-    LE_EMAIL)
+    VLESS_DOMAIN | HY2_DOMAIN | LE_EMAIL)
       if [[ "$value" == - ]]; then
         value=""
       fi
       ;;
+  esac
+  case "$key" in
+    *_DOMAIN | UUID | CERT_MODE) value="${value,,}" ;;
   esac
   printf '%s' "$value"
 }
@@ -159,8 +171,8 @@ prompt::_ask() {
 
 prompt::_question() {
   case "$1" in
-    VLESS_DOMAIN) echo "Domain for direct VLESS connections, an A record to this server" ;;
-    HY2_DOMAIN) echo "Domain for Hysteria2, an A record to this server" ;;
+    VLESS_DOMAIN) echo "Domain for direct VLESS connections, an A record to this server; - for none" ;;
+    HY2_DOMAIN) echo "Domain for Hysteria2 whose certificate this script issues, an A record to this server; - for none" ;;
     CDN_DOMAIN) echo "Domain of the CDN resource, a CNAME to the CDN" ;;
     ORIGIN_IP) echo "Public IPv4 of this server, the origin of the CDN resource" ;;
     XHTTP_PORT) echo "Local port of the xray xhttp inbound" ;;
@@ -214,6 +226,23 @@ prompt::_ask_uuid() {
   fi
 }
 
+# The command restarts the node for a renewed HY2_DOMAIN certificate; without that domain
+# there is nothing to restart for, and the current value stays as it is.
+prompt::_ask_node_reload() {
+  if [[ -n "${HY2_DOMAIN:-}" ]]; then
+    prompt::_ask NODE_RELOAD_CMD
+  fi
+}
+
+# VLESS_DOMAIN may be skipped before CERT_MODE is known. When the answers leave origin
+# nginx without a certificate, it is asked again, now as a required value.
+prompt::_ask_origin_domain() {
+  if ! env::origin_cert_domain >/dev/null; then
+    log::warn "origin nginx needs a certificate: under http-01 or ISSUE_CDN_ORIGIN_CERT=false it comes from VLESS_DOMAIN, a domain of this server"
+    prompt::_ask VLESS_DOMAIN
+  fi
+}
+
 # Only DNS-01 needs the token; under http-01 the current value stays as it is.
 prompt::_ask_cf_token() {
   if [[ "$CERT_MODE" == dns-cloudflare ]]; then
@@ -226,7 +255,7 @@ prompt::_ask_issue_cdn_cert() {
   local default=y
   if [[ "$CERT_MODE" == http-01 ]]; then
     ISSUE_CDN_ORIGIN_CERT=false
-    log::info "ISSUE_CDN_ORIGIN_CERT=false: http-01 cannot validate CDN_DOMAIN, origin nginx reuses the VLESS_DOMAIN certificate"
+    log::info "ISSUE_CDN_ORIGIN_CERT=false: http-01 cannot validate CDN_DOMAIN, origin nginx serves the VLESS_DOMAIN certificate"
   else
     if [[ "${ISSUE_CDN_ORIGIN_CERT:-}" == false ]]; then
       default=n

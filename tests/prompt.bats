@@ -101,14 +101,51 @@ invalid() {
   [[ "$shown" != *tok-7f3a9* ]]
 }
 
-@test "empty input repeats the question for each of the three domains" {
-  collect "" vless.example.com "" hy2.example.com "" cdn.example.com 203.0.113.10 \
+@test "empty input repeats the question for CDN_DOMAIN, the only domain always required" {
+  collect vless.example.com hy2.example.com "" cdn.example.com 203.0.113.10 \
     "" "" "" "" "" tok-7f3a9 "" "" ""
   [ "$status" -eq 0 ]
-  [ "$(grep -c 'WARN.*_DOMAIN: expected a domain name' <<<"$output")" -eq 3 ]
+  [ "$(grep -c 'WARN.*_DOMAIN: expected a domain name' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"CDN_DOMAIN: expected a domain name"* ]]
+  env::load "$ENV_FILE"
+  [ "$CDN_DOMAIN" = cdn.example.com ]
+}
+
+@test "a server that already runs VLESS and Hysteria2 skips both and gets the CDN only" {
+  collect "" - cdn.example.com 203.0.113.10 "" "" "" "" "" tok-7f3a9 "" ""
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -E 'WARN.*_DOMAIN|needs a certificate' <<<"$output")" -eq 0 ]
+  # No Hysteria2 certificate to renew, so no node restart command to ask for.
+  [[ "$output" != *"Command that restarts the node"* ]]
+  env::load "$ENV_FILE"
+  [ -z "$VLESS_DOMAIN" ]
+  [ -z "$HY2_DOMAIN" ]
+  [ "$CDN_DOMAIN" = cdn.example.com ]
+  [ "$ISSUE_CDN_ORIGIN_CERT" = true ]
+}
+
+@test "http-01 without a domain of this server asks for VLESS_DOMAIN again" {
+  collect "" "" cdn.example.com 203.0.113.10 "" "" "" "" http-01 "" vless.example.com
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"origin nginx needs a certificate: under http-01 or ISSUE_CDN_ORIGIN_CERT=false it comes from VLESS_DOMAIN"* ]]
   env::load "$ENV_FILE"
   [ "$VLESS_DOMAIN" = vless.example.com ]
-  [ "$HY2_DOMAIN" = hy2.example.com ]
+  [ -z "$HY2_DOMAIN" ]
+  rm "$ENV_FILE"
+  collect "" "" cdn.example.com 203.0.113.10 "" "" "" "" http-01 ""
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"VLESS_DOMAIN: origin nginx needs a certificate for a domain of this server"* ]]
+}
+
+@test "- clears VLESS_DOMAIN and HY2_DOMAIN kept in .env" {
+  collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 \
+    "" "" "" "" "" tok-7f3a9 "" "" ""
+  [ "$status" -eq 0 ]
+  collect - - "" "" "" "" "" "" "" "" "" ""
+  [ "$status" -eq 0 ]
+  env::load "$ENV_FILE"
+  [ -z "$VLESS_DOMAIN" ]
+  [ -z "$HY2_DOMAIN" ]
   [ "$CDN_DOMAIN" = cdn.example.com ]
 }
 
@@ -145,9 +182,9 @@ invalid() {
 }
 
 @test "input that ends before a required answer exits 2 and writes nothing" {
-  collect vless.example.com
+  collect vless.example.com hy2.example.com
   [ "$status" -eq 2 ]
-  [[ "$output" == *"HY2_DOMAIN: expected a domain name"* ]]
+  [[ "$output" == *"CDN_DOMAIN: expected a domain name"* ]]
   [ ! -e "$ENV_FILE" ]
   collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 "" "" "" "" ""
   [ "$status" -eq 2 ]
@@ -282,9 +319,25 @@ EOF
   HY2_DOMAIN=hy2.example.com
   valid VLESS_DOMAIN vless.example.com
   valid HY2_DOMAIN vless.example.com hy2.example.com
-  invalid VLESS_DOMAIN "" localhost vless_example.com
+  invalid VLESS_DOMAIN localhost vless_example.com
   valid CDN_DOMAIN cdn.example.com
   invalid CDN_DOMAIN "" vless.example.com hy2.example.com
+  CDN_DOMAIN=cdn.example.com
+  invalid VLESS_DOMAIN cdn.example.com
+  invalid HY2_DOMAIN cdn.example.com
+}
+
+@test "prompt::validate: VLESS_DOMAIN and HY2_DOMAIN may stay empty unless origin needs VLESS_DOMAIN" {
+  CERT_MODE=dns-cloudflare
+  ISSUE_CDN_ORIGIN_CERT=true
+  valid VLESS_DOMAIN ""
+  valid HY2_DOMAIN ""
+  CERT_MODE=http-01
+  invalid VLESS_DOMAIN ""
+  valid HY2_DOMAIN ""
+  CERT_MODE=dns-cloudflare
+  ISSUE_CDN_ORIGIN_CERT=false
+  invalid VLESS_DOMAIN ""
 }
 
 @test "prompt::validate: ports stay off 443 and off each other" {

@@ -31,7 +31,11 @@ readonly CERTS_MIN_DAYS=30
 certs::issue() {
   local domain hy2_issued=0 due=() failed=()
   require::cmd certbot openssl
-  env::require VLESS_DOMAIN HY2_DOMAIN CDN_DOMAIN CERT_MODE NODE_RELOAD_CMD
+  env::require CDN_DOMAIN CERT_MODE
+  if [[ -n "${HY2_DOMAIN:-}" ]]; then
+    env::require NODE_RELOAD_CMD
+  fi
+  env::require_origin_cert
   case "$CERT_MODE" in
     dns-cloudflare)
       env::require CF_API_TOKEN
@@ -59,7 +63,7 @@ certs::issue() {
   fi
   for domain in "${due[@]}"; do
     if certs::_certbot "$domain"; then
-      if [[ "$domain" == "$HY2_DOMAIN" ]]; then
+      if [[ "$domain" == "${HY2_DOMAIN:-}" ]]; then
         hy2_issued=1
       fi
     else
@@ -81,7 +85,10 @@ certs::issue() {
 # sure certbot.timer runs the renewals (tech.md §8).
 certs::install_renew_hook() {
   local pre="$SYSROOT$CERTS_HOOKS/pre/cdn-deploy-acme.sh" post="$SYSROOT$CERTS_HOOKS/post/cdn-deploy-acme.sh"
-  env::require VLESS_DOMAIN HY2_DOMAIN NODE_RELOAD_CMD CERT_MODE
+  env::require CERT_MODE
+  if [[ -n "${HY2_DOMAIN:-}" ]]; then
+    env::require NODE_RELOAD_CMD
+  fi
   mkdir -p "$SYSROOT$CERTS_HOOKS/deploy" "$SYSROOT$CERTS_HOOKS/pre" "$SYSROOT$CERTS_HOOKS/post"
   fs::write "$SYSROOT$CERTS_HOOKS/deploy/cdn-deploy.sh" 755 "$(certs::_deploy_hook)"
   if [[ "$CERT_MODE" == http-01 ]]; then
@@ -98,10 +105,14 @@ certs::install_renew_hook() {
 
 # --- issuance ---------------------------------------------------------------------------
 
-# VLESS and Hysteria2 always get a certificate, CDN_DOMAIN only per env::cdn_has_cert.
+# VLESS and Hysteria2 get a certificate when their domain is set: on a server that
+# already runs them, empty domains leave their certificates alone. CDN_DOMAIN gets one
+# per env::cdn_has_cert.
 certs::_domains() {
-  printf '%s\n' "$VLESS_DOMAIN"
-  if [[ "$HY2_DOMAIN" != "$VLESS_DOMAIN" ]]; then
+  if [[ -n "${VLESS_DOMAIN:-}" ]]; then
+    printf '%s\n' "$VLESS_DOMAIN"
+  fi
+  if [[ -n "${HY2_DOMAIN:-}" && "$HY2_DOMAIN" != "${VLESS_DOMAIN:-}" ]]; then
     printf '%s\n' "$HY2_DOMAIN"
   fi
   if env::cdn_has_cert; then
@@ -247,20 +258,31 @@ certs::_remove_acme_site() {
 # --- renewal hooks ----------------------------------------------------------------------
 
 # certbot sets RENEWED_DOMAINS for deploy hooks. Only the Hysteria2 certificate lives in
-# the node, so other renewals skip the restart and keep client sessions alive.
+# the node, so other renewals skip the restart and keep client sessions alive. Without
+# HY2_DOMAIN the script does not manage that certificate, and the hook only reloads nginx.
 certs::_deploy_hook() {
   cat <<EOF
 #!/bin/sh
 # cdn-deploy deploy hook (tech.md §5): certbot runs it after each renewed certificate.
 # Written by ./deploy.sh from .env: rerun it after changing HY2_DOMAIN or NODE_RELOAD_CMD.
-node_reload=$(certs::_sh_quote "$NODE_RELOAD_CMD")
-$(certs::_sh_reload)
+EOF
+  if [[ -n "${HY2_DOMAIN:-}" ]]; then
+    printf 'node_reload=%s\n' "$(certs::_sh_quote "$NODE_RELOAD_CMD")"
+  fi
+  certs::_sh_reload
+  cat <<'EOF'
 rc=0
 reload || rc=1
+EOF
+  if [[ -n "${HY2_DOMAIN:-}" ]]; then
+    cat <<EOF
 case " \${RENEWED_DOMAINS:-} " in
 *" $HY2_DOMAIN "*) sh -c "\$node_reload" || rc=1 ;;
 esac
-exit "\$rc"
+EOF
+  fi
+  cat <<'EOF'
+exit "$rc"
 EOF
 }
 

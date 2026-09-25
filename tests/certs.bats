@@ -153,6 +153,27 @@ snapshot() {
   [ ! -e "$LE/live/cdn.example.com" ]
 }
 
+@test "a server that already runs VLESS and Hysteria2 gets only the CDN certificate" {
+  VLESS_DOMAIN=""
+  HY2_DOMAIN=""
+  NODE_RELOAD_CMD=""
+  run certs::issue
+  [ "$status" -eq 0 ]
+  [ "$(calls '^certbot certonly')" -eq 1 ]
+  [ "$(calls '--cert-name cdn.example.com ')" -eq 1 ]
+  [ "$(calls '^docker')" -eq 0 ]
+}
+
+@test "http-01 without a domain of this server exits 2 before certbot runs" {
+  VLESS_DOMAIN=""
+  HY2_DOMAIN=""
+  CERT_MODE=http-01
+  run certs::issue
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"origin nginx needs a certificate"* ]]
+  [ "$(calls .)" -eq 0 ]
+}
+
 @test "a domain shared by VLESS and Hysteria2 gets one certificate" {
   HY2_DOMAIN=vless.example.com
   run certs::issue
@@ -353,6 +374,20 @@ snapshot() {
   touch "$TMP/docker-fail"
   run env RENEWED_DOMAINS=hy2.example.com "$hook"
   [ "$status" -eq 1 ]
+}
+
+@test "without HY2_DOMAIN the deploy hook only reloads nginx" {
+  local hook="$LE/renewal-hooks/deploy/cdn-deploy.sh"
+  HY2_DOMAIN=""
+  NODE_RELOAD_CMD=""
+  certs::install_renew_hook 2>/dev/null
+  sh -n "$hook"
+  run grep -c 'node_reload' "$hook"
+  [ "$output" = 0 ]
+  : >"$TMP/calls"
+  run env RENEWED_DOMAINS="vless.example.com cdn.example.com" "$hook"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TMP/calls")" = "nginx -s reload" ]
 }
 
 # Only the deploy hook runs here: the pre and post hooks edit the real /etc/nginx.

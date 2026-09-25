@@ -175,10 +175,28 @@ readonly -a ENV_SECRET_KEYS=(CF_API_TOKEN UUID)
 env::is_secret() { env::_contains "$1" "${ENV_SECRET_KEYS[@]}"; }
 
 # CDN_DOMAIN gets its own origin certificate only under dns-cloudflare with
-# ISSUE_CDN_ORIGIN_CERT=true: http-01 cannot validate a CNAME to the CDN. Otherwise origin
-# nginx serves the VLESS_DOMAIN certificate (tech.md §4).
+# ISSUE_CDN_ORIGIN_CERT=true: http-01 cannot validate a CNAME to the CDN.
 env::cdn_has_cert() {
   [[ "${CERT_MODE:-}" == dns-cloudflare && "${ISSUE_CDN_ORIGIN_CERT:-true}" == true ]]
+}
+
+# Prints the domain whose certificate origin nginx serves: CDN_DOMAIN per
+# env::cdn_has_cert, else VLESS_DOMAIN, a name of this server. Returns 1 when neither
+# applies: a CDN-only setup under http-01 still needs a domain of this server.
+env::origin_cert_domain() {
+  if env::cdn_has_cert; then
+    printf '%s' "${CDN_DOMAIN:-}"
+  elif [[ -n "${VLESS_DOMAIN:-}" ]]; then
+    printf '%s' "$VLESS_DOMAIN"
+  else
+    return 1
+  fi
+}
+
+# Exits 2 when origin nginx would have no certificate to serve.
+env::require_origin_cert() {
+  env::origin_cert_domain >/dev/null ||
+    log::die "$EXIT_INPUT" "origin nginx needs a certificate: set VLESS_DOMAIN to a domain of this server, or use CERT_MODE=dns-cloudflare with ISSUE_CDN_ORIGIN_CERT=true. Rerun ./deploy.sh"
 }
 
 # Loads KEY=VALUE lines into exported variables (envsubst reads the environment)

@@ -101,13 +101,32 @@ EOF
     deploy --dry-run
     [ "$status" -eq 0 ]
     certs="$(step_line certs)"
-    [[ "$certs" == *"reuses the VLESS_DOMAIN certificate"* ]]
+    [[ "$certs" == *"serves the VLESS_DOMAIN certificate"* ]]
     [[ "$certs" != *cdn.example.com* ]] || {
       echo "$setting still plans a CDN certificate"
       return 1
     }
     [[ "$(step_line nginx)" == *"(certificate of vless.example.com)"* ]]
   done
+}
+
+@test "--dry-run plans a CDN-only server: no VLESS or Hysteria2 certificate, no node restart" {
+  printf 'CDN_DOMAIN=cdn.example.com\nORIGIN_IP=203.0.113.10\n' >"$REPO/.env"
+  deploy --dry-run
+  [ "$status" -eq 0 ]
+  has_line '^ +VLESS_DOMAIN +<unset>$'
+  [[ "$(step_line certs)" == *"via dns-cloudflare: cdn.example.com; skip"* ]]
+  [[ "$(step_line renew-hook)" == *"no node restart: HY2_DOMAIN is not set"* ]]
+  [[ "$(step_line nginx)" == *"(certificate of cdn.example.com)"* ]]
+  [[ "$(cat "$TMP/stderr")" != *"needs a certificate"* ]]
+}
+
+@test "--dry-run warns when origin nginx would have no certificate" {
+  printf 'CDN_DOMAIN=cdn.example.com\nCERT_MODE=http-01\n' >"$REPO/.env"
+  deploy --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$TMP/stderr")" == *"a real run stops here: origin nginx needs a certificate: set VLESS_DOMAIN"* ]]
+  [[ "$(step_line nginx)" == *"(certificate of <VLESS_DOMAIN>)"* ]]
 }
 
 @test "--dry-run exits 2 on a malformed .env" {
