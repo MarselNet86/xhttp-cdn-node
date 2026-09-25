@@ -1,0 +1,32 @@
+{
+  "tag": "VLESS-REALITY",
+  "port": 443,
+  "listen": "0.0.0.0",
+  "protocol": "vless",
+  "settings": {
+    "clients": [],
+    "decryption": "none"
+  },
+  "sniffing": {
+    "enabled": true,
+    "routeOnly": true,
+    "destOverride": ["http", "tls", "quic"],
+    "metadataOnly": false
+  },
+  "streamSettings": {
+    "network": "raw",
+    "sockopt": {
+      "tcpcongestion": "bbr",
+      "tcpKeepAliveInterval": 15
+    },
+    "security": "reality",
+    "realitySettings": {
+      "dest": "${REALITY_SNI}:443",
+      "show": false,
+      "xver": 0,
+      "shortIds": ["", "${REALITY_SHORT_ID}"],
+      "privateKey": "${REALITY_PRIVATE_KEY}",
+      "serverNames": ["${REALITY_SNI}"]
+    }
+  }
+}

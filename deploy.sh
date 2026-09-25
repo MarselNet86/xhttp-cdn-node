@@ -161,7 +161,9 @@ deploy::describe() {
       printf 'templates/ into /etc/nginx/: :%s %s (certificate of %s) -> 127.0.0.1:%s; drop %s; nginx -t; reload' \
         "$tls_port" "$cdn" "$(deploy::origin_cert_domain)" "$xhttp_port" "sites-enabled/default"
       ;;
-    remnawave) printf 'render out/remnawave/ (xhttp inbound, host extra) to paste into the panel' ;;
+    remnawave)
+      printf 'render out/remnawave/: config profile, host extra, Xray JSON template, xhttp inbound; walk through the panel and the CDN resource'
+      ;;
     validate)
       printf 'layers: xray 127.0.0.1:%s; origin :%s /cdn-check 204; %stest 400 with padding; CDN %s /cdn-check 204' \
         "$xhttp_port" "$tls_port" "$(deploy::show XHTTP_PATH)" "$cdn"

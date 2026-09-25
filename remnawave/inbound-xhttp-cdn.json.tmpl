@@ -16,6 +16,9 @@
   "streamSettings": {
     "network": "xhttp",
     "security": "none",
+    "sockopt": {
+      "trustedXForwardedFor": ["X-Real-IP"]
+    },
     "xhttpSettings": {
       "host": "${CDN_DOMAIN}",
       "mode": "packet-up",

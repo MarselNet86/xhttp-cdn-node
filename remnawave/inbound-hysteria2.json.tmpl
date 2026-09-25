@@ -1,0 +1,37 @@
+{
+  "tag": "HYSTERIA2",
+  "port": 443,
+  "listen": "0.0.0.0",
+  "protocol": "hysteria",
+  "settings": {
+    "clients": [],
+    "version": 2
+  },
+  "sniffing": {
+    "enabled": true,
+    "routeOnly": true,
+    "destOverride": ["http", "tls", "quic"],
+    "metadataOnly": false
+  },
+  "streamSettings": {
+    "network": "hysteria",
+    "security": "tls",
+    "tlsSettings": {
+      "alpn": ["h3"],
+      "certificates": [
+        {
+          "keyFile": "/etc/letsencrypt/live/${HY2_DOMAIN}/privkey.pem",
+          "certificateFile": "/etc/letsencrypt/live/${HY2_DOMAIN}/fullchain.pem"
+        }
+      ]
+    },
+    "hysteriaSettings": {
+      "version": 2,
+      "masquerade": {
+        "url": "https://${REALITY_SNI}",
+        "type": "proxy",
+        "rewriteHost": true
+      }
+    }
+  }
+}
