@@ -323,11 +323,11 @@ snapshot() {
   [ "$(calls '^docker')" -eq 0 ]
 }
 
-@test "a failing node restart only warns" {
+@test "a failing node restart only warns: on a new server the node comes later" {
   touch "$TMP/docker-fail"
   run certs::issue
   [ "$status" -eq 0 ]
-  [[ "$output" == *"node restart failed"* ]]
+  [[ "$output" == *"node restart failed: a node that is not installed yet reads the certificate when it starts"* ]]
 }
 
 @test "LE_EMAIL goes to certbot, an empty one registers without email" {

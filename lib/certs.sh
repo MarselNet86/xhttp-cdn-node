@@ -180,11 +180,12 @@ certs::_write_cf_credentials() {
 dns_cloudflare_api_token = $CF_API_TOKEN"
 }
 
-# The Hysteria2 inbound loads its certificate when the node starts.
+# The Hysteria2 inbound loads its certificate when the node starts. On a new server the
+# node comes later, in the panel steps, so the restart has nothing to restart yet.
 certs::_restart_node() {
   log::info "restarting the node for the new Hysteria2 certificate: $NODE_RELOAD_CMD"
   if ! sh -c "$NODE_RELOAD_CMD" >&2; then
-    log::warn "node restart failed: run '$NODE_RELOAD_CMD' once the node is up"
+    log::warn "node restart failed: a node that is not installed yet reads the certificate when it starts; a running one needs '$NODE_RELOAD_CMD'"
   fi
 }
 
