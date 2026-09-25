@@ -44,7 +44,7 @@ prompt::validate() {
           reason="origin nginx needs a certificate for a domain of this server: under http-01 or ISSUE_CDN_ORIGIN_CERT=false it is VLESS_DOMAIN"
         fi
       elif ! is::fqdn "$value"; then
-        reason="expected a domain name like ${sample,,}.example.com"
+        reason="expected a domain name like ${sample,,}.example.com$(prompt::_foreign_chars "$value")"
       elif [[ "$key" == CDN_DOMAIN &&
         ("$value" == "${VLESS_DOMAIN:-}" || "$value" == "${HY2_DOMAIN:-}") ]]; then
         reason="must differ from VLESS_DOMAIN and HY2_DOMAIN: it resolves to the CDN, they resolve to this server"
@@ -100,7 +100,7 @@ prompt::validate() {
       ;;
     REALITY_SNI)
       if [[ -n "$value" ]] && ! is::fqdn "$value"; then
-        reason="expected a domain name like www.swiss.com, or - for no Reality"
+        reason="expected a domain name like www.swiss.com, or - for no Reality$(prompt::_foreign_chars "$value")"
       fi
       ;;
     REALITY_PRIVATE_KEY)
@@ -221,6 +221,41 @@ prompt::_trim() {
   done
   s="${s#"${s%%[![:space:]]*}"}"
   printf '%s' "${s%"${s##*[![:space:]]}"}"
+}
+
+# Names the first characters of VALUE that a domain cannot hold, with their positions: a
+# Cyrillic letter that looks Latin, a typographic dash, a key typed as a control code.
+prompt::_foreign_chars() {
+  local LC_ALL=C.UTF-8 s="$1" ch n i list="" found=0
+  for ((i = 0; i < ${#s} && found < 3; i++)); do
+    ch="${s:i:1}"
+    if [[ "$ch" == [A-Za-z0-9.-] ]]; then
+      continue
+    fi
+    printf -v n '%d' "'$ch"
+    if ((n < 32 || n == 127)); then
+      ch="a control character (an arrow or another special key)"
+    elif ((n == 32)); then
+      ch="a space"
+    elif ((n < 128)); then
+      ch="'$ch'"
+    elif ((n >= 0x400 && n <= 0x4ff)); then
+      ch="Cyrillic $ch"
+    elif ((n >= 0x2010 && n <= 0x2015 || n == 0x2212)); then
+      printf -v ch 'a typographic dash %s (U+%04X)' "$ch" "$n"
+    else
+      printf -v ch '%s (U+%04X)' "$ch" "$n"
+    fi
+    list+="${list:+, }$ch at $((i + 1))"
+    # A special key types a whole escape sequence: its start says enough.
+    if ((n < 32 || n == 127)); then
+      break
+    fi
+    found=$((found + 1))
+  done
+  if [[ -n "$list" ]]; then
+    printf '; it holds %s' "$list"
+  fi
 }
 
 # Without a value in .env, offers the IPv4 that ifconfig.me sees (tech.md §4).

@@ -352,6 +352,24 @@ EOF
   [ "$CDN_DOMAIN" = cdn.example.com ]
 }
 
+@test "a domain that only looks right is refused with its odd characters named" {
+  run prompt::validate VLESS_DOMAIN $'vl\xd0\xb5ss.example.com'
+  [ "$status" -eq 1 ]
+  [ "$output" = $'expected a domain name like vless.example.com; it holds Cyrillic \xd0\xb5 at 3' ]
+  run prompt::validate CDN_DOMAIN $'cdn.my\xe2\x80\x91example.com'
+  [ "$output" = $'expected a domain name like cdn.example.com; it holds a typographic dash \xe2\x80\x91 (U+2011) at 7' ]
+  run prompt::validate HY2_DOMAIN $'hy2.example.co\e[Dm'
+  [ "$output" = "expected a domain name like hy2.example.com; it holds a control character (an arrow or another special key) at 15" ]
+  run prompt::validate VLESS_DOMAIN "https://vless.example.com/"
+  [ "$output" = "expected a domain name like vless.example.com; it holds ':' at 6, '/' at 7, '/' at 8" ]
+  run prompt::validate VLESS_DOMAIN "vless example.com"
+  [ "$output" = "expected a domain name like vless.example.com; it holds a space at 6" ]
+  run prompt::validate REALITY_SNI $'www.sw\xd1\x96ss.com'
+  [ "$output" = $'expected a domain name like www.swiss.com, or - for no Reality; it holds Cyrillic \xd1\x96 at 7' ]
+  run prompt::validate VLESS_DOMAIN localhost
+  [ "$output" = "expected a domain name like vless.example.com" ]
+}
+
 @test "prompt::validate: domains, with CDN_DOMAIN apart from the others" {
   VLESS_DOMAIN=vless.example.com
   HY2_DOMAIN=hy2.example.com
