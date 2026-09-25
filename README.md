@@ -8,7 +8,7 @@
 <p align="center"><img src="docs/readme/hero.svg" width="920" alt="Терминал: sudo ./deploy.sh проходит четыре слоя проверки (xray, origin nginx, путь xhttp, CDN edge), затем ./check.sh показывает серверы подписки CDN, Reality и Hysteria2 со статусом OK и задержкой"></p>
 
 <p align="center">
-  <a href="#что-нужно-заранее"><img alt="Ubuntu 22.04 и 24.04" src="https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04-E95420?logo=ubuntu&logoColor=white"></a>
+  <a href="#что-нужно-заранее"><img alt="Ubuntu 22.04, 24.04 и 26.04" src="https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2026.04-E95420?logo=ubuntu&logoColor=white"></a>
   <a href="#что-нужно-заранее"><img alt="Debian 12" src="https://img.shields.io/badge/Debian-12-A81D33?logo=debian&logoColor=white"></a>
   <a href="#чекер-подписки"><img alt="Xray-core" src="https://img.shields.io/badge/Xray--core-26.3%20%7C%2026.6%2B-8b5cf6"></a>
   <a href="#ресурс-timeweb-cdn"><img alt="Timeweb CDN" src="https://img.shields.io/badge/CDN-Timeweb-1f6feb"></a>
@@ -29,7 +29,7 @@
 
 ## Установка
 
-Одна команда. Ubuntu 22.04/24.04 или Debian 12, root:
+Одна команда. Ubuntu 22.04/24.04/26.04 или Debian 12, root:
 
 ```sh
 git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node && sudo ./deploy.sh
@@ -52,7 +52,7 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 | | |
 |---|---|
 | **Панель** | Remnawave уже работает. Ноду в ней заранее не создавайте: скрипт выдаст профиль, и нода создаётся уже с ним ([шаг 2 в панели](#шаг-в-панели-remnawave)) |
-| **Сервер** | Ubuntu 22.04/24.04 или Debian 12, доступ root. Нода `remnanode` ставится на него по ходу скрипта, на шаге 2 в панели, как в [официальной инструкции](https://docs.rw/install/remnawave-node/) |
+| **Сервер** | Ubuntu 22.04/24.04/26.04 или Debian 12, доступ root. Нода `remnanode` ставится на него по ходу скрипта, на шаге 2 в панели, как в [официальной инструкции](https://docs.rw/install/remnawave-node/) |
 | **Домены** | `CDN_DOMAIN`: поддомен с CNAME на технический домен ресурса Timeweb (`*.cdn.twcstorage.ru`). `VLESS_DOMAIN` и `HY2_DOMAIN` по желанию: A-записи на IP ноды, см. [уже работающий сервер](#уже-работающий-сервер) |
 | **Сертификаты** | DNS-зона в Cloudflare: `dns-cloudflare` и токен с правом `Zone:DNS:Edit`. Зона у любого другого DNS: `http-01` и открытый порт 80 |
 | **Firewall** | 8444/tcp для CDN, 443/tcp и 443/udp для Reality и Hysteria2, порт ноды 2222/tcp для панели, 80/tcp в режиме `http-01` |
@@ -308,7 +308,7 @@ shellcheck deploy.sh check.sh lib/*.sh tests/*.bats
 bats tests/
 ```
 
-Тесты не трогают систему: `CDN_DEPLOY_SYSROOT` уводит системные файлы во временный каталог, а certbot, nginx, curl, xray и другие внешние команды заменены заглушками. Тесты гоняются в Docker-образах Ubuntu 22.04/24.04 и Debian 12, под root и под обычным пользователем.
+Тесты не трогают систему: `CDN_DEPLOY_SYSROOT` уводит системные файлы во временный каталог, а certbot, nginx, curl, xray и другие внешние команды заменены заглушками. Тесты гоняются в Docker-образах Ubuntu 22.04/24.04/26.04 и Debian 12, под root и под обычным пользователем.
 
 ```
 deploy.sh     установка: порядок шагов и --dry-run
