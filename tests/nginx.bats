@@ -155,6 +155,16 @@ has() {
   [ "$status" -eq 1 ]
 }
 
+@test "XHTTP_PATH without its trailing slash, as Timeweb forwards it, goes to xray with it" {
+  XHTTP_PATH=/cdn/v1.bin/
+  run nginx::render
+  [ "$status" -eq 0 ]
+  # An exact location rewrites to the prefix one; nginx would answer 301 on its own.
+  has "$SITE" 'location = /cdn/v1.bin {'
+  has "$SITE" 'rewrite ^ /cdn/v1.bin/ last;'
+  [ "$(grep -A1 -F 'location = /cdn/v1.bin {' "$SITE" | tail -n 1 | tr -s ' ')" = ' rewrite ^ /cdn/v1.bin/ last;' ]
+}
+
 @test "the origin serves the CDN certificate when one is issued, the VLESS one otherwise" {
   run nginx::render
   [ "$status" -eq 0 ]

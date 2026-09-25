@@ -34,6 +34,12 @@ server {
         return 204;
     }
 
+    # Timeweb forwards XHTTP_PATH without its trailing slash, and xray knows the path only
+    # with it. The rewrite keeps the query, which carries the session and the sequence.
+    location = ${XHTTP_PATH_BARE} {
+        rewrite ^ ${XHTTP_PATH} last;
+    }
+
     location ^~ ${XHTTP_PATH} {
         proxy_pass http://xray_xhttp;
         proxy_http_version 1.1;

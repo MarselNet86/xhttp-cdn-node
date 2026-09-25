@@ -109,11 +109,12 @@ nginx::_cert_dir() {
 # Renders templates/NAME with the cert directory CERT_DIR and the config id CONFIG_ID.
 # Only the listed placeholders change, so nginx variables such as $request_method stay.
 nginx::_template() {
-  local name="$1" out
+  local name="$1" bare="${XHTTP_PATH%/}" out
   # shellcheck disable=SC2016  # envsubst takes the placeholder list literally
-  out="$(XHTTP_PORT="$XHTTP_PORT" XHTTP_PATH="$XHTTP_PATH" NGINX_TLS_PORT="$NGINX_TLS_PORT" \
-    CDN_DOMAIN="$CDN_DOMAIN" VLESS_DOMAIN="$VLESS_DOMAIN" ORIGIN_CERT_DIR="$2" CONFIG_ID="$3" \
-    envsubst '${XHTTP_PORT} ${XHTTP_PATH} ${NGINX_TLS_PORT} ${CDN_DOMAIN} ${VLESS_DOMAIN} ${ORIGIN_CERT_DIR} ${CONFIG_ID}' \
+  out="$(XHTTP_PORT="$XHTTP_PORT" XHTTP_PATH="$XHTTP_PATH" XHTTP_PATH_BARE="$bare" \
+    NGINX_TLS_PORT="$NGINX_TLS_PORT" CDN_DOMAIN="$CDN_DOMAIN" VLESS_DOMAIN="$VLESS_DOMAIN" \
+    ORIGIN_CERT_DIR="$2" CONFIG_ID="$3" \
+    envsubst '${XHTTP_PORT} ${XHTTP_PATH} ${XHTTP_PATH_BARE} ${NGINX_TLS_PORT} ${CDN_DOMAIN} ${VLESS_DOMAIN} ${ORIGIN_CERT_DIR} ${CONFIG_ID}' \
     <"$REPO_ROOT/templates/$name")"
   if [[ "$out" == *"\${"* ]]; then
     log::error "templates/$name has a placeholder that nginx::render does not fill"
