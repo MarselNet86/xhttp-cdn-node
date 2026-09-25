@@ -203,8 +203,22 @@ prompt::_question() {
   esac
 }
 
+# A paste from a web page or a messenger can carry characters that a terminal does not
+# show: zero-width space, non-joiner and joiner, the direction marks, the word joiner, the
+# byte order mark and the soft hyphen. No setting holds them, so they go. No-break spaces
+# (plain, figure, narrow), which [:space:] leaves out, count as spaces.
+readonly -a PROMPT_INVISIBLE=($'\xe2\x80\x8b' $'\xe2\x80\x8c' $'\xe2\x80\x8d' $'\xe2\x80\x8e'
+  $'\xe2\x80\x8f' $'\xe2\x81\xa0' $'\xef\xbb\xbf' $'\xc2\xad')
+readonly -a PROMPT_NBSP=($'\xc2\xa0' $'\xe2\x80\x87' $'\xe2\x80\xaf')
+
 prompt::_trim() {
-  local s="$1"
+  local s="$1" c
+  for c in "${PROMPT_INVISIBLE[@]}"; do
+    s="${s//"$c"/}"
+  done
+  for c in "${PROMPT_NBSP[@]}"; do
+    s="${s//"$c"/ }"
+  done
   s="${s#"${s%%[![:space:]]*}"}"
   printf '%s' "${s%"${s##*[![:space:]]}"}"
 }

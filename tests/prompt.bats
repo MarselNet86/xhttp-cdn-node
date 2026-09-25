@@ -339,6 +339,19 @@ EOF
   [ -z "$LE_EMAIL" ]
 }
 
+@test "a paste loses the invisible characters it carries, no-break spaces at the ends too" {
+  local zwsp=$'\xe2\x80\x8b' nbsp=$'\xc2\xa0' bom=$'\xef\xbb\xbf' shy=$'\xc2\xad'
+  collect "${bom}vless.exa${zwsp}mple.com${nbsp}" "${nbsp}hy2.example.com" "cdn.ex${shy}ample.com" \
+    203.0.113.10 "" "" "" "" "" tok-7f3a9 "" "" ""
+  [ "$status" -eq 0 ]
+  run grep -E '^\[WARN\] [A-Z0-9]+_DOMAIN:' <<<"$output"
+  [ "$status" -eq 1 ]
+  env::load "$ENV_FILE"
+  [ "$VLESS_DOMAIN" = vless.example.com ]
+  [ "$HY2_DOMAIN" = hy2.example.com ]
+  [ "$CDN_DOMAIN" = cdn.example.com ]
+}
+
 @test "prompt::validate: domains, with CDN_DOMAIN apart from the others" {
   VLESS_DOMAIN=vless.example.com
   HY2_DOMAIN=hy2.example.com
