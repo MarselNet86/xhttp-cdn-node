@@ -16,17 +16,72 @@ prompt::collect() {
   fi
   log::info "Enter keeps the value in [brackets]"
   for key in "${ENV_KEYS[@]}"; do
+    if ! prompt::_asks "$key"; then
+      prompt::_skip "$key"
+      continue
+    fi
+    prompt::_number "$key"
     case "$key" in
       ORIGIN_IP) prompt::_ask_origin_ip ;;
-      CF_API_TOKEN) prompt::_ask_cf_token ;;
-      NODE_RELOAD_CMD) prompt::_ask_node_reload ;;
       ISSUE_CDN_ORIGIN_CERT) prompt::_ask_issue_cdn_cert ;;
       REALITY_PRIVATE_KEY | REALITY_SHORT_ID) prompt::_ask_reality "$key" ;;
       *) prompt::_ask "$key" ;;
     esac
   done
+  UI_NUMBER=""
   prompt::_ask_origin_domain
   prompt::_write_env
+}
+
+# Whether KEY gets a question under the answers so far. A question that hangs on the
+# answer for a key in PENDING, a list of keys still to ask, counts as asked.
+prompt::_asks() {
+  local key="$1" pending=" ${2-} " by
+  case "$key" in
+    CF_API_TOKEN | ISSUE_CDN_ORIGIN_CERT) by=CERT_MODE ;;
+    NODE_RELOAD_CMD) by=HY2_DOMAIN ;;
+    REALITY_PRIVATE_KEY | REALITY_SHORT_ID) by=REALITY_SNI ;;
+    *) return 0 ;;
+  esac
+  if [[ "$pending" == *" $by "* ]]; then
+    return 0
+  fi
+  case "$key" in
+    # Only DNS-01 needs the token. http-01 cannot validate CDN_DOMAIN, a CNAME to the CDN.
+    CF_API_TOKEN) [[ "${CERT_MODE:-}" == dns-cloudflare ]] ;;
+    ISSUE_CDN_ORIGIN_CERT) [[ "${CERT_MODE:-}" != http-01 ]] ;;
+    # The restart makes the node load a renewed HY2_DOMAIN certificate.
+    NODE_RELOAD_CMD) [[ -n "${HY2_DOMAIN:-}" ]] ;;
+    # Without REALITY_SNI there is no Reality inbound.
+    *) [[ -n "${REALITY_SNI:-}" ]] ;;
+  esac
+}
+
+# A key left without a question keeps its current value. The exception: http-01 forces
+# ISSUE_CDN_ORIGIN_CERT=false (tech.md §4).
+prompt::_skip() {
+  if [[ "$1" == ISSUE_CDN_ORIGIN_CERT ]]; then
+    export ISSUE_CDN_ORIGIN_CERT=false
+    log::info "ISSUE_CDN_ORIGIN_CERT=false: http-01 cannot validate CDN_DOMAIN, origin nginx serves the VLESS_DOMAIN certificate"
+  fi
+}
+
+# Numbers the question for KEY in UI_NUMBER, as "3/14". KEY and the keys after it are
+# pending, so the total counts every question they may bring and only goes down.
+prompt::_number() {
+  local key="$1" k n=0 total=0 pending=""
+  for k in "${ENV_KEYS[@]}"; do
+    if [[ "$k" == "$key" || -n "$pending" ]]; then
+      pending+="$k "
+    fi
+    if prompt::_asks "$k" "$pending"; then
+      total=$((total + 1))
+      if [[ "$k" == "$key" ]]; then
+        n="$total"
+      fi
+    fi
+  done
+  UI_NUMBER="$n/$total"
 }
 
 # Checks VALUE for KEY against the contract (tech.md §4) and the answers given before
@@ -141,7 +196,7 @@ prompt::_is_email() {
 # Once stdin runs out, an acceptable default is taken and anything else is an error,
 # so deploy.sh runs without a terminal when .env is complete.
 prompt::_ask() {
-  local key="$1" default label="${3-}" answer value reason eof
+  local key="$1" default label="${3-}" answer value reason eof hidden=0 text
   if (($# >= 2)); then
     default="$2"
   else
@@ -153,18 +208,25 @@ prompt::_ask() {
       label="keep current"
     fi
   fi
+  if [[ -t 0 ]] && env::is_secret "$key"; then
+    hidden=1
+  fi
+  text="$(prompt::_question "$key")"
+  ui::question "${text%%|*}" "${text#*|}"
   while true; do
-    printf '%s\n%s%s: ' "$(prompt::_question "$key")" "$key" "${label:+ [$label]}" >&2
+    ui::field "$key" "$label"
     eof=0
-    if [[ -t 0 ]] && env::is_secret "$key"; then
+    if ((hidden)); then
       IFS= read -rs answer || eof=1
-      printf '\n' >&2
     else
       IFS= read -r answer || eof=1
       # Without a terminal the answer is not echoed; end the line for the next message.
       [[ -t 0 ]] || printf '\n' >&2
     fi
     answer="$(prompt::_trim "$answer")"
+    if ((hidden)); then
+      ui::hidden "${#answer}"
+    fi
     value="$(prompt::_normalize "$key" "${answer:-$default}")"
     if reason="$(prompt::validate "$key" "$value")"; then
       printf -v "$key" '%s' "$value"
@@ -174,26 +236,27 @@ prompt::_ask() {
     if ((eof)); then
       log::die "$EXIT_INPUT" "$key: $reason. Input ended: run ./deploy.sh in a terminal or complete $ENV_FILE"
     fi
-    log::warn "$key: $reason"
+    ui::rejected "$key" "$reason"
   done
 }
 
+# Prints the question for KEY and, after a |, its hint.
 prompt::_question() {
   case "$1" in
-    VLESS_DOMAIN) echo "Domain for direct VLESS connections, an A record to this server; - for none" ;;
-    HY2_DOMAIN) echo "Domain for Hysteria2 whose certificate this script issues, an A record to this server; - for none" ;;
-    CDN_DOMAIN) echo "Domain of the CDN resource, a CNAME to the CDN" ;;
-    ORIGIN_IP) echo "Public IPv4 of this server, the origin of the CDN resource" ;;
-    XHTTP_PORT) echo "Local port of the xray xhttp inbound" ;;
-    XHTTP_PATH) echo "xhttp path, the same in the panel inbound and host" ;;
-    NGINX_TLS_PORT) echo "Port where nginx accepts connections from the CDN edge" ;;
-    CERT_MODE) echo "Certificate issuance: dns-cloudflare or http-01" ;;
-    CF_API_TOKEN) echo "Cloudflare API token with Zone:DNS:Edit (input hidden)" ;;
-    LE_EMAIL) echo "Let's Encrypt contact email, - for none" ;;
-    NODE_RELOAD_CMD) echo "Command that restarts the node after a certificate renewal" ;;
-    REALITY_SNI) echo "Site that VLESS Reality impersonates: TLS 1.3, close to this server, open from Russia; - for no Reality" ;;
-    REALITY_PRIVATE_KEY) echo "Reality x25519 private key (input hidden)" ;;
-    REALITY_SHORT_ID) echo "Reality short id, hex" ;;
+    VLESS_DOMAIN) echo "Domain for direct VLESS connections|an A record to this server; - for none" ;;
+    HY2_DOMAIN) echo "Domain for Hysteria2 whose certificate this script issues|an A record to this server; - for none" ;;
+    CDN_DOMAIN) echo "Domain of the CDN resource|a CNAME to the CDN" ;;
+    ORIGIN_IP) echo "Public IPv4 of this server|the origin of the CDN resource" ;;
+    XHTTP_PORT) echo "Local port of the xray xhttp inbound|" ;;
+    XHTTP_PATH) echo "xhttp path|the same in the panel inbound and host" ;;
+    NGINX_TLS_PORT) echo "Port where nginx accepts connections from the CDN edge|" ;;
+    CERT_MODE) echo "Certificate issuance|dns-cloudflare or http-01" ;;
+    CF_API_TOKEN) echo "Cloudflare API token with Zone:DNS:Edit|input hidden: paste it and press Enter" ;;
+    LE_EMAIL) echo "Let's Encrypt contact email|- for none" ;;
+    NODE_RELOAD_CMD) echo "Command that restarts the node after the Hysteria2 certificate renews|certbot runs it after each renewal; remnanode is the container from the panel" ;;
+    REALITY_SNI) echo "Site that VLESS Reality impersonates|TLS 1.3, close to this server, open from Russia; - for no Reality" ;;
+    REALITY_PRIVATE_KEY) echo "Reality x25519 private key|input hidden" ;;
+    REALITY_SHORT_ID) echo "Reality short id|hex" ;;
   esac
 }
 
@@ -277,22 +340,10 @@ prompt::_detect_ip() {
   printf '%s' "$ip"
 }
 
-# The command restarts the node for a renewed HY2_DOMAIN certificate; without that domain
-# there is nothing to restart for, and the current value stays as it is.
-prompt::_ask_node_reload() {
-  if [[ -n "${HY2_DOMAIN:-}" ]]; then
-    prompt::_ask NODE_RELOAD_CMD
-  fi
-}
-
-# The Reality keys of the generated config profile. Without REALITY_SNI there is no
-# Reality inbound, and the current values stay as they are. Enter keeps the keys of an
-# existing .env, so a rerun does not break the clients; without them it takes new ones.
+# The Reality keys of the generated config profile. Enter keeps the keys of an existing
+# .env, so a rerun does not break the clients; without them it takes new ones.
 prompt::_ask_reality() {
   local key="$1"
-  if [[ -z "${REALITY_SNI:-}" ]]; then
-    return 0
-  fi
   if [[ -n "${!key:-}" ]]; then
     prompt::_ask "$key"
   elif [[ "$key" == REALITY_PRIVATE_KEY ]]; then
@@ -320,28 +371,15 @@ prompt::_ask_origin_domain() {
   fi
 }
 
-# Only DNS-01 needs the token; under http-01 the current value stays as it is.
-prompt::_ask_cf_token() {
-  if [[ "$CERT_MODE" == dns-cloudflare ]]; then
-    prompt::_ask CF_API_TOKEN
-  fi
-}
-
-# http-01 cannot validate CDN_DOMAIN, a CNAME to the CDN, so it forces false (tech.md §4).
 prompt::_ask_issue_cdn_cert() {
   local default=y
-  if [[ "$CERT_MODE" == http-01 ]]; then
-    ISSUE_CDN_ORIGIN_CERT=false
-    log::info "ISSUE_CDN_ORIGIN_CERT=false: http-01 cannot validate CDN_DOMAIN, origin nginx serves the VLESS_DOMAIN certificate"
+  if [[ "${ISSUE_CDN_ORIGIN_CERT:-}" == false ]]; then
+    default=n
+  fi
+  if confirm "Issue an origin certificate for $CDN_DOMAIN (ISSUE_CDN_ORIGIN_CERT)?" "$default"; then
+    ISSUE_CDN_ORIGIN_CERT=true
   else
-    if [[ "${ISSUE_CDN_ORIGIN_CERT:-}" == false ]]; then
-      default=n
-    fi
-    if confirm "Issue an origin certificate for $CDN_DOMAIN (ISSUE_CDN_ORIGIN_CERT)?" "$default"; then
-      ISSUE_CDN_ORIGIN_CERT=true
-    else
-      ISSUE_CDN_ORIGIN_CERT=false
-    fi
+    ISSUE_CDN_ORIGIN_CERT=false
   fi
   export ISSUE_CDN_ORIGIN_CERT
 }

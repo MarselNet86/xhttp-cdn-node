@@ -173,7 +173,7 @@ remnawave::_step() {
     fi
   done
   if ((pause > 0)) && remnawave::_interactive; then
-    printf '     Press Enter when done. ' >&2
+    printf '     %sPress Enter when done.%s ' "$UI_DIM" "$UI_RESET" >&2
     read -r _ || true
   fi
 }

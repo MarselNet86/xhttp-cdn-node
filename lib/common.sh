@@ -34,20 +34,27 @@ readonly REPO_ROOT ENV_FILE="$REPO_ROOT/.env" ENV_EXAMPLE="$REPO_ROOT/.env.examp
 
 # --- terminal ---------------------------------------------------------------------------
 
-# A person at a terminal gets colours; a log file, a pipe or a test gets plain text.
-# NO_COLOR (no-color.org) and TERM=dumb keep it plain.
+# A person at a terminal gets colours and the questions laid out as a form; a log file, a
+# pipe or a test gets plain text. NO_COLOR (no-color.org) and TERM=dumb keep it plain.
 ui::init() {
-  UI_STYLE=0
-  UI_RESET="" UI_BOLD="" UI_RED="" UI_GREEN="" UI_YELLOW="" UI_CYAN=""
+  UI_STYLE=0 UI_NUMBER=""
+  UI_RESET="" UI_BOLD="" UI_DIM="" UI_RED="" UI_GREEN="" UI_YELLOW="" UI_CYAN=""
+  UI_ARROW=">" UI_CROSS="x" UI_DOT="*"
   if [[ -t 2 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != dumb ]]; then
     ui::enable
   fi
 }
 
+# The font of the Linux console lacks the marks, so it keeps the ASCII ones.
 ui::enable() {
   UI_STYLE=1
-  UI_RESET=$'\e[0m' UI_BOLD=$'\e[1m' UI_RED=$'\e[31m' UI_GREEN=$'\e[32m'
+  UI_RESET=$'\e[0m' UI_BOLD=$'\e[1m' UI_DIM=$'\e[2m' UI_RED=$'\e[31m' UI_GREEN=$'\e[32m'
   UI_YELLOW=$'\e[33m' UI_CYAN=$'\e[36m'
+  if [[ "${TERM:-}" == linux ]]; then
+    UI_ARROW=">" UI_CROSS="x" UI_DOT="*"
+  else
+    UI_ARROW="›" UI_CROSS="✗" UI_DOT="•"
+  fi
 }
 
 ui::init
@@ -308,17 +315,73 @@ env::_contains() {
 }
 
 # --- interaction ------------------------------------------------------------------------
+# On a terminal the questions read like a form on a web page: the number and the question
+# in bold, a hint under it, the field, the reason for a refused answer in red. Elsewhere
+# the question takes one line and a refusal is a warning.
+
+# Prints QUESTION and its HINT, numbered with UI_NUMBER ("3/14") when the caller sets it.
+ui::question() {
+  local question="$1" hint="${2-}"
+  if ((UI_STYLE)); then
+    printf '\n  %s%5s%s  %s%s%s\n' "$UI_DIM" "$UI_NUMBER" "$UI_RESET" "$UI_BOLD" "$question" \
+      "$UI_RESET" >&2
+    if [[ -n "$hint" ]]; then
+      printf '         %s%s%s\n' "$UI_DIM" "$hint" "$UI_RESET" >&2
+    fi
+  else
+    printf '%s%s\n' "$question" "${hint:+ ($hint)}" >&2
+  fi
+}
+
+# Prints the field of KEY with KEEPS, the value Enter keeps, in brackets.
+ui::field() {
+  local key="$1" keeps="${2-}"
+  if ((UI_STYLE)); then
+    printf '         %s%s%s%s ' "${key:+$UI_CYAN$key$UI_RESET }" "$UI_DIM" \
+      "${keeps:+[$keeps] }$UI_ARROW" "$UI_RESET" >&2
+  else
+    printf '%s%s: ' "$key" "${keeps:+ [$keeps]}" >&2
+  fi
+}
+
+# Ends the field of a hidden answer of LENGTH characters. On a terminal a dot stands for
+# each one, so a paste shows that it arrived.
+ui::hidden() {
+  local dots
+  if ((UI_STYLE)); then
+    printf -v dots '%*s' "$1" ''
+    printf '%s' "${dots// /$UI_DOT}" >&2
+  fi
+  printf '\n' >&2
+}
+
+# Says why the answer for KEY (none for a yes/no question) is refused.
+ui::rejected() {
+  local key="$1" reason="$2"
+  if ((UI_STYLE)); then
+    printf '       %s%s %s%s\n' "$UI_RED" "$UI_CROSS" "$reason" "$UI_RESET" >&2
+  else
+    log::warn "${key:+$key: }$reason"
+  fi
+}
 
 # Asks a yes/no question on stderr and reads the answer from stdin. An empty answer or
 # EOF takes the default: no, unless the second argument is y.
 confirm() {
-  local prompt="$1" answer default_rc=1 hint='[y/N]'
+  local prompt="$1" answer default_rc=1 hint='y/N'
   if [[ "${2:-n}" == y ]]; then
     default_rc=0
-    hint='[Y/n]'
+    hint='Y/n'
+  fi
+  if ((UI_STYLE)); then
+    ui::question "$prompt"
   fi
   while true; do
-    printf '%s %s ' "$prompt" "$hint" >&2
+    if ((UI_STYLE)); then
+      ui::field "" "$hint"
+    else
+      printf '%s [%s] ' "$prompt" "$hint" >&2
+    fi
     if ! IFS= read -r answer && [[ -z "$answer" ]]; then
       printf '\n' >&2
       return "$default_rc"
@@ -330,7 +393,7 @@ confirm() {
       "") return "$default_rc" ;;
       y | yes) return 0 ;;
       n | no) return 1 ;;
-      *) log::warn "answer y or n" ;;
+      *) ui::rejected "" "answer y or n" ;;
     esac
   done
 }

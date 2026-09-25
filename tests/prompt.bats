@@ -68,6 +68,8 @@ invalid() {
   local keys siblings
   fresh
   [ "$status" -eq 0 ]
+  # No terminal, no colours.
+  [[ "$output" != *$'\e['* ]]
   keys="$(sed -nE 's/^([A-Z0-9_]+)=.*/\1/p' "$ENV_FILE" | tr '\n' ' ')"
   [ "$keys" = "${ENV_KEYS[*]} " ]
   mode_600
@@ -200,6 +202,50 @@ invalid() {
   [ "$NGINX_TLS_PORT" = 8450 ]
   [ "$LE_EMAIL" = ops@example.com ]
   [ "$ISSUE_CDN_ORIGIN_CERT" = false ]
+}
+
+@test "on a terminal the questions read as a numbered form with hints under them" {
+  local first
+  ui::enable
+  fresh
+  [ "$status" -eq 0 ]
+  first=$'\n  \e[2m 1/15\e[0m  \e[1mDomain for direct VLESS connections\e[0m\n'
+  first+=$'         \e[2man A record to this server; - for none\e[0m\n'
+  first+=$'         \e[36mVLESS_DOMAIN\e[0m \e[2m\xe2\x80\xba\e[0m '
+  [[ "$output" == *"$first"* ]]
+  [[ "$output" == *$'\e[36mXHTTP_PORT\e[0m \e[2m[4443] \xe2\x80\xba\e[0m '* ]]
+  [[ "$output" == *$'\e[2m15/15\e[0m  \e[1mReality short id\e[0m'* ]]
+  [[ "$output" != *tok-7f3a9* ]]
+  env::load "$ENV_FILE"
+  [ "$CDN_DOMAIN" = cdn.example.com ]
+}
+
+@test "the question count only drops as the answers leave questions out" {
+  ui::enable
+  collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 \
+    "" "" "" http-01 "" ""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\e[2m 8/15\e[0m  \e[1mCertificate issuance'* ]]
+  [[ "$output" == *$'\e[2m 9/13\e[0m  \e[1mLet\'s Encrypt contact email'* ]]
+  [[ "$output" == *$'\e[2m13/13\e[0m  \e[1mReality short id'* ]]
+  rm "$ENV_FILE"
+  collect "" - cdn.example.com 203.0.113.10 "" "" "" "" tok-7f3a9 "" ""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\e[2m 2/15\e[0m  \e[1mDomain for Hysteria2'* ]]
+  [[ "$output" == *$'\e[2m 3/14\e[0m  \e[1mDomain of the CDN resource'* ]]
+}
+
+@test "on a terminal a refused answer gets its reason in red under the field" {
+  local refused
+  ui::enable
+  collect vless_example.com vless.example.com hy2.example.com cdn.example.com 203.0.113.10 \
+    "" "" "" "" tok-7f3a9 "" "" ""
+  [ "$status" -eq 0 ]
+  refused=$'\n       \e[31m\xe2\x9c\x97 expected a domain name like vless.example.com; it holds \'_\' at 6\e[0m\n'
+  refused+=$'         \e[36mVLESS_DOMAIN\e[0m '
+  [[ "$output" == *"$refused"* ]]
+  [ "$(grep -c 'Domain for direct VLESS connections' <<<"$output")" -eq 1 ]
+  [[ "$output" != *"[WARN] VLESS_DOMAIN"* ]]
 }
 
 @test "input that ends before a required answer exits 2 and writes nothing" {

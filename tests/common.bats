@@ -346,6 +346,29 @@ EOF
   [[ "$output" == *"answer y or n"* ]]
 }
 
+@test "a hidden answer ends with a dot per character on a terminal, bare elsewhere" {
+  run ui::hidden 5
+  [ "$output" = "" ]
+  ui::enable
+  run ui::hidden 5
+  [ "$output" = $'\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2' ]
+  run ui::hidden 0
+  [ "$output" = "" ]
+  # The font of the Linux console has no bullet.
+  TERM=linux ui::enable
+  run ui::hidden 3
+  [ "$output" = "***" ]
+}
+
+@test "on a terminal confirm asks in the layout of a form and refuses in red" {
+  ui::enable
+  run confirm "Proceed?" y <<<$'maybe\n'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\e[1mProceed?\e[0m\n         \e[2m[Y/n] \xe2\x80\xba\e[0m '* ]]
+  [[ "$output" == *$'       \e[31m\xe2\x9c\x97 answer y or n\e[0m'* ]]
+  [[ "$output" != *"[WARN]"* ]]
+}
+
 @test ".env.example lists the contract keys in order with the contract defaults" {
   local example="$BATS_TEST_DIRNAME/../.env.example" keys key
   keys="$(sed -nE 's/^([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p' "$example" | tr '\n' ' ')"
