@@ -25,7 +25,7 @@ validate::layers() {
 validate::_xray() {
   local addrs
   if ! validate::_listening "$XHTTP_PORT"; then
-    validate::_fail 1 xray "nothing listens on 127.0.0.1:$XHTTP_PORT: the node has no VLESS-XHTTP-CDN inbound yet. Put out/remnawave/config-profile.json on the node in the panel (the steps above), rerun ./deploy.sh"
+    validate::_fail 1 xray "nothing listens on 127.0.0.1:$XHTTP_PORT: no node runs the VLESS-XHTTP-CDN inbound yet. Do panel steps 1 and 2 above (the profile from out/remnawave/config-profile.json, then the node with it), rerun ./deploy.sh"
   fi
   if command -v ss >/dev/null 2>&1; then
     addrs="$(ss -Hltn "sport = :$XHTTP_PORT" 2>/dev/null | awk '{print $4}' || true)"

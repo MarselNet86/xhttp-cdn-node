@@ -118,7 +118,7 @@ calls() {
   rm "$TMP/xray-up"
   run validate::layers
   [ "$status" -eq 8 ]
-  [[ "$output" == *"layer 1 (xray) failed: nothing listens on 127.0.0.1:4443: the node has no VLESS-XHTTP-CDN inbound yet. Put out/remnawave/config-profile.json on the node"* ]]
+  [[ "$output" == *"layer 1 (xray) failed: nothing listens on 127.0.0.1:4443: no node runs the VLESS-XHTTP-CDN inbound yet. Do panel steps 1 and 2 above"* ]]
   [ "$(calls 'https://')" -eq 0 ]
 }
 

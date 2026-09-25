@@ -136,10 +136,13 @@ remnawave::_guide() {
   remnawave::_step "Config profile" \
     "Config Profiles -> Create Config Profile -> a name -> paste $out/config-profile.json -> Save." \
     "Inbounds: $inbounds." \
-    "${HY2_DOMAIN:+HYSTERIA2 reads /etc/letsencrypt/live/$HY2_DOMAIN/ inside the node container: /opt/remnanode/docker-compose.yml needs the volume /etc/letsencrypt:/etc/letsencrypt:ro.}" \
     "The node keeps a profile of its own? Put only $out/inbound-xhttp-cdn.json into its \"inbounds\"."
+  # The panel asks for the profile when it creates a node, so the node comes second.
   remnawave::_step "Node" \
-    "Nodes -> Management -> the node card -> Change Profile -> the new profile, all its inbounds on."
+    "New node: Nodes -> Management -> Create node, address ${ORIGIN_IP:-<IP of this server>}; on the last step choose the profile from step 1 with all its inbounds -> Copy docker-compose.yml -> Create node." \
+    "${HY2_DOMAIN:+HYSTERIA2 reads /etc/letsencrypt/live/$HY2_DOMAIN/ inside the node container: add the volume /etc/letsencrypt:/etc/letsencrypt:ro to the service in docker-compose.yml; a running node takes it with docker compose up -d.}" \
+    "On this server: the file goes to /opt/remnanode/docker-compose.yml, then cd /opt/remnanode && docker compose up -d. No Docker yet: curl -fsSL https://get.docker.com | sh first." \
+    "A node already in the panel: the node card -> Change Profile -> the profile from step 1 with all its inbounds."
   remnawave::_step "Internal squad" \
     "Internal Squads -> the squad of your users (Default-Squad) -> turn the new inbounds on -> Save."
   remnawave::_step "Subscription template" \

@@ -82,9 +82,25 @@ host_extra() {
   [[ "$output" == *"CDN: inbound VLESS-XHTTP-CDN, address cdn.example.com, port 443. Advanced: SNI and host cdn.example.com, path /api/v2.jpg/, security TLS, extra <- out/remnawave/host-xhttp-extra.json"* ]]
   [[ "$output" == *"Reality: inbound VLESS-REALITY, address vless.example.com, port 443"* ]]
   [[ "$output" == *"Hysteria2: inbound HYSTERIA2, address hy2.example.com"* ]]
-  [[ "$output" == *"/opt/remnanode/docker-compose.yml needs the volume /etc/letsencrypt:/etc/letsencrypt:ro"* ]]
   [[ "$output" == *"Source: 203.0.113.10:8444, HTTPS for the source on"* ]]
   [[ "$output" != *INFO* ]]
+}
+
+@test "the node comes after the profile: the panel creates it with the profile, its compose file starts it here" {
+  local step1 step2
+  full_node
+  emit
+  [ "$status" -eq 0 ]
+  step1="$(sed -n '/^  1\. /,/^  2\. /p' <<<"$output")"
+  step2="$(sed -n '/^  2\. /,/^  3\. /p' <<<"$output")"
+  [[ "$step2" == *"New node: Nodes -> Management -> Create node, address 203.0.113.10; on the last step choose the profile from step 1 with all its inbounds -> Copy docker-compose.yml -> Create node."* ]]
+  [[ "$step2" == *"On this server: the file goes to /opt/remnanode/docker-compose.yml, then cd /opt/remnanode && docker compose up -d."* ]]
+  [[ "$step2" == *"A node already in the panel: the node card -> Change Profile -> the profile from step 1"* ]]
+  [[ "$step1" != *docker-compose* ]]
+  # The volume has to be in the compose file before its first start.
+  [ "$(grep -n 'add the volume /etc/letsencrypt:/etc/letsencrypt:ro' <<<"$step2" | cut -d: -f1)" -lt \
+    "$(grep -n 'docker compose up -d. No Docker' <<<"$step2" | cut -d: -f1)" ]
+  [[ "$step2" == *"HYSTERIA2 reads /etc/letsencrypt/live/hy2.example.com/ inside the node container"* ]]
 }
 
 @test "the config profile carries Reality, the xhttp inbound and Hysteria2 for the node's domains" {
@@ -106,7 +122,8 @@ host_extra() {
   emit
   [ "$status" -eq 0 ]
   [ "$(jq -c '[.inbounds[].tag]' "$OUT/config-profile.json")" = '["VLESS-XHTTP-CDN"]' ]
-  [[ "$output" != *"Reality:"* && "$output" != *"Hysteria2:"* && "$output" != *docker-compose* ]]
+  [[ "$output" != *"Reality:"* && "$output" != *"Hysteria2:"* && "$output" != *"/etc/letsencrypt:/etc/letsencrypt:ro"* ]]
+  [[ "$output" == *"Create node, address <IP of this server>;"* ]]
   HY2_DOMAIN=hy2.example.com emit
   [ "$status" -eq 0 ]
   jq -e '.inbounds[1].tag == "HYSTERIA2" and (.inbounds[1].streamSettings.hysteriaSettings | has("masquerade") | not)' \
