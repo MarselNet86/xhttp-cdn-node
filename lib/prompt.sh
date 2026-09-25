@@ -197,14 +197,12 @@ prompt::validate() {
 }
 
 # What is wrong with a SECRET_KEY, if anything. The node takes base64 of a JSON object with
-# four PEM strings (remnawave/node 3.4 checks the same), so a cut or mangled paste shows up
-# here and not in the node log. A terminal line holds 4095 characters.
+# four PEM strings (remnawave/node 3.4 checks the same), so a mangled paste shows up here
+# and not in the node log.
 prompt::_node_key_problem() {
   local value="$1"
   if [[ -z "$value" ]]; then
     echo "nothing entered: copy SECRET_KEY from the docker-compose.yml that the panel shows for the node"
-  elif ((${#value} >= 4095)); then
-    echo "the terminal cut the paste at 4095 characters: put NODE_SECRET_KEY into $ENV_FILE by hand"
   elif [[ ! "$value" =~ ^[A-Za-z0-9+/]+=*$ ]]; then
     echo "expected SECRET_KEY from the panel: base64, letters, digits, + and /$(prompt::_foreign_chars "$value" 'A-Za-z0-9+/=')"
   elif ! base64 -d <<<"$value" 2>/dev/null |
@@ -252,7 +250,7 @@ prompt::_is_email() {
 # Once stdin runs out, an acceptable default is taken and anything else is an error,
 # so deploy.sh runs without a terminal when .env is complete.
 prompt::_ask() {
-  local key="$1" default label="${3-}" answer value reason eof hidden=0 text
+  local key="$1" default label="${3-}" answer value reason eof cut hidden=0 text
   if (($# >= 2)); then
     default="$2"
   else
@@ -279,9 +277,19 @@ prompt::_ask() {
       # Without a terminal the answer is not echoed; end the line for the next message.
       [[ -t 0 ]] || printf '\n' >&2
     fi
+    cut=0
+    if [[ -t 0 ]] && (($(prompt::_bytes "$answer") >= 4095)); then
+      cut=1
+    fi
     answer="$(prompt::_trim "$answer")"
     if ((hidden)); then
       ui::hidden "${#answer}"
+    fi
+    # A terminal line holds 4095 bytes and drops the rest of a longer paste, so a line that
+    # fills it lost its end.
+    if ((cut)); then
+      ui::rejected "$key" "the terminal cut the paste at 4095 characters: put $key into $ENV_FILE by hand"
+      continue
     fi
     value="$(prompt::_normalize "$key" "${answer:-$default}")"
     if reason="$(prompt::validate "$key" "$value")"; then
@@ -294,6 +302,12 @@ prompt::_ask() {
     fi
     ui::rejected "$key" "$reason"
   done
+}
+
+# The length of S in bytes.
+prompt::_bytes() {
+  local LC_ALL=C
+  printf '%d' "${#1}"
 }
 
 # Prints the question for KEY and, after a |, its hint.

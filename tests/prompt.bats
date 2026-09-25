@@ -518,20 +518,44 @@ EOF
 }
 
 @test "prompt::validate: the SECRET_KEY of the node decodes to its certificates" {
-  local key cut
+  local key long
   key="$(node_key)"
-  valid NODE_SECRET_KEY "$key"
+  # .env and pipes hold longer lines than a terminal does.
+  long="$(printf '{"caCertPem":"%5000s","jwtPublicKey":"jwt","nodeCertPem":"cert","nodeKeyPem":"key"}' ca |
+    base64 | tr -d '\n')"
+  valid NODE_SECRET_KEY "$key" "$long"
   invalid NODE_SECRET_KEY "" "${key:0:40}" "$(printf 'not json' | base64)" \
     "$(printf '{"caCertPem":"ca"}' | base64 | tr -d '\n')"
   run prompt::validate NODE_SECRET_KEY ""
   [ "$output" = "nothing entered: copy SECRET_KEY from the docker-compose.yml that the panel shows for the node" ]
   run prompt::validate NODE_SECRET_KEY "${key}\$x"
   [ "$output" = "expected SECRET_KEY from the panel: base64, letters, digits, + and /; it holds '\$' at $((${#key} + 1))" ]
-  printf -v cut '%4095s' ''
-  run prompt::validate NODE_SECRET_KEY "${cut// /A}"
-  [[ "$output" == "the terminal cut the paste at 4095 characters: put NODE_SECRET_KEY into "*"/.env by hand" ]]
   run prompt::validate NODE_SECRET_KEY "$(printf '{"caCertPem":"ca"}' | base64 | tr -d '\n')"
   [[ "$output" == "it does not decode to the node certificates (caCertPem, jwtPublicKey, nodeCertPem, nodeKeyPem)"* ]]
+}
+
+@test "a terminal cuts a paste at 4095 bytes: the answer is refused as cut, not as malformed" {
+  local long
+  script --version >/dev/null 2>&1 || skip "needs script from util-linux for a terminal"
+  printf -v long '%5000s' ''
+  long="${long// /a}"
+  printf 'source %q\n' "$REPO/lib/prompt.sh" >"$TMP/ask.sh"
+  cat >>"$TMP/ask.sh" <<'EOF'
+prompt::_ask XHTTP_PATH /api/v2.jpg/
+echo "XHTTP_PATH=$XHTTP_PATH"
+EOF
+  {
+    printf '/%s/\n' "$long"
+    sleep 2
+    printf '/cdn/v1.bin/\n'
+    sleep 2
+  } | timeout 30 script -qec "bash $TMP/ask.sh" /dev/null >"$TMP/out" 2>&1 || true
+  grep -q "the terminal cut the paste at 4095 characters: put XHTTP_PATH into $REPO/.env by hand" "$TMP/out"
+  grep -q "XHTTP_PATH=/cdn/v1.bin/" "$TMP/out"
+  # Without a terminal nothing cuts the line.
+  run bash -c 'source "$1"; prompt::_ask XHTTP_PATH /api/v2.jpg/ <<<"/$2/" 2>/dev/null; printf "%s" "${#XHTTP_PATH}"' \
+    _ "$REPO/lib/prompt.sh" "$long"
+  [ "$output" = 5002 ]
 }
 
 @test "prompt::validate: NODE_PORT stays off 443 and the ports of xray and nginx" {
