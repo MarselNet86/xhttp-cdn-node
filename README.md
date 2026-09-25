@@ -3,7 +3,7 @@
 <h1 align="center">xhttp-cdn-node</h1>
 
 <p align="center"><b>Нода Remnawave за CDN одной командой.</b><br />
-nginx, сертификаты и тюнинг ядра на origin, проверка всей цепочки до CDN и чекер каждого сервера подписки.</p>
+На новом сервере или рядом с уже работающими VLESS и Hysteria2: nginx, сертификаты и тюнинг ядра на origin, проверка всей цепочки до CDN и чекер каждого сервера подписки.</p>
 
 <p align="center"><img src="docs/readme/hero.svg" width="920" alt="Терминал: sudo ./deploy.sh проходит четыре слоя проверки (xray, origin nginx, путь xhttp, CDN edge), затем ./check.sh показывает серверы подписки CDN, Reality и Hysteria2 со статусом OK и задержкой"></p>
 
@@ -52,13 +52,24 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 | | |
 |---|---|
 | **Сервер** | Ubuntu 22.04/24.04 или Debian 12, доступ root. Нода Remnawave в docker-контейнере `remnawave-node`; если он называется иначе, поправьте `NODE_RELOAD_CMD` |
-| **Домены** | `VLESS_DOMAIN` и `HY2_DOMAIN`: A-записи на IP ноды. `CDN_DOMAIN`: поддомен с CNAME на технический домен ресурса Timeweb (`*.cdn.twcstorage.ru`) |
+| **Домены** | `CDN_DOMAIN`: поддомен с CNAME на технический домен ресурса Timeweb (`*.cdn.twcstorage.ru`). `VLESS_DOMAIN` и `HY2_DOMAIN` по желанию: A-записи на IP ноды, см. [уже работающий сервер](#уже-работающий-сервер) |
 | **Сертификаты** | DNS-зона в Cloudflare: `dns-cloudflare` и токен с правом `Zone:DNS:Edit`. Зона у любого другого DNS: `http-01` и открытый порт 80 |
 | **Firewall** | 8444/tcp для CDN, 443/tcp и 443/udp для Reality и Hysteria2, 80/tcp в режиме `http-01` |
 | **fail2ban** | Только джейл `sshd`: HTTP-джейлы банят адреса edge CDN |
 
 > [!NOTE]
 > Режим выбирается по тому, где лежит DNS-зона (NS-серверы), а не по регистратору. В режиме `http-01` сертификат для `CDN_DOMAIN` не выпускается: origin работает на сертификате `VLESS_DOMAIN`, и Timeweb это принимает.
+
+### Уже работающий сервер
+
+Если на сервере уже крутятся VLESS Reality или Hysteria2, CDN добавляется рядом, и они продолжают работать как работали.
+
+- **`HY2_DOMAIN` оставьте пустым** (Enter или `-`). Скрипт не будет выпускать сертификат Hysteria2 и никогда не перезапустит ноду: ни при установке, ни при продлении.
+- **`VLESS_DOMAIN` тоже можно оставить пустым,** если зона в Cloudflare (`dns-cloudflare`): origin получит сертификат на `CDN_DOMAIN`. При `http-01` укажите любой домен этого сервера с A-записью: он нужен только для сертификата origin. Если забудете, скрипт спросит его отдельно.
+- **Инбаунды VLESS и Hysteria2 не трогаются:** конфиг xray ведёт панель, скрипт лишь готовит xhttp-инбаунд, который вы добавите рядом.
+
+> [!WARNING]
+> nginx скрипт забирает целиком. `nginx.conf` перезаписывается (копия остаётся в `nginx.conf.cdn-deploy-orig`), `sites-enabled/default` удаляется. Остальные сайты остаются, но не должны слушать `NGINX_TLS_PORT` и объявлять `upstream xray_xhttp`: иначе `nginx -t` не пройдёт, и скрипт вернёт прежний конфиг с кодом 7.
 
 ### Ресурс Timeweb CDN
 
@@ -73,7 +84,7 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 
 **Origin для CDN.** nginx на `:8444` принимает соединения от edge и передаёт их xray на `127.0.0.1:4443` по HTTP. Путь без завершающего слеша, в котором Timeweb пересылает xhttp-запросы, тоже доходит до xray.
 
-**Сертификаты с продлением.** Let's Encrypt для VLESS, Hysteria2 и CDN-домена, продление по `certbot.timer`. Хук перезагружает nginx, а ноду перезапускает, только когда продлился сертификат Hysteria2: xray читает его при старте.
+**Сертификаты с продлением.** Let's Encrypt для заданных доменов (VLESS, Hysteria2, CDN), продление по `certbot.timer`. Хук перезагружает nginx, а ноду перезапускает, только когда продлился сертификат Hysteria2: xray читает его при старте.
 
 **Тюнинг против 503.** Очереди соединений, BBR, диапазон портов, лимит `nofile` 65535 для nginx. Порты `XHTTP_PORT` и `NGINX_TLS_PORT` зарезервированы, чтобы их не заняли исходящие соединения.
 
@@ -93,7 +104,7 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 | 2 | `input` | опрос параметров, запись `.env` |
 | 3 | `config` | загрузка `.env`, проверка обязательных значений |
 | 4 | `packages` | доустановка nginx, certbot, python3-certbot-dns-cloudflare, curl, jq, openssl, coreutils, gettext-base, procps |
-| 5 | `certs` | выпуск сертификатов; сертификат, валидный ещё 30+ дней, не трогается |
+| 5 | `certs` | выпуск сертификатов для заданных доменов; сертификат, валидный ещё 30+ дней, не трогается |
 | 6 | `renew-hook` | хук продления и `certbot.timer` |
 | 7 | `sysctl` | тюнинг ядра, лимиты `nofile`, резерв портов |
 | 8 | `nginx` | конфиг из `templates/`, `nginx -t`, reload, откат при ошибке |
@@ -106,8 +117,8 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
-| `VLESS_DOMAIN` | — | домен прямого VLESS; его сертификат служит origin, если нет своего для CDN |
-| `HY2_DOMAIN` | — | домен Hysteria2 с настоящим сертификатом |
+| `VLESS_DOMAIN` | пусто | домен этого сервера для прямого VLESS; обязателен при `http-01`, где его сертификат служит origin |
+| `HY2_DOMAIN` | пусто | домен Hysteria2, сертификат которого выпускает и продлевает скрипт |
 | `CDN_DOMAIN` | — | домен CDN-ресурса: `server_name` origin, host xhttp |
 | `ORIGIN_IP` | автоопределение | публичный IPv4 ноды, источник CDN-ресурса |
 | `XHTTP_PORT` | `4443` | локальный порт xhttp-инбаунда xray |
@@ -116,7 +127,7 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 | `CERT_MODE` | `dns-cloudflare` | `dns-cloudflare` или `http-01` |
 | `CF_API_TOKEN` | — | токен Cloudflare, нужен только в режиме `dns-cloudflare` |
 | `LE_EMAIL` | пусто | контакт для Let's Encrypt |
-| `NODE_RELOAD_CMD` | `docker restart remnawave-node` | перезапуск ноды после продления сертификата Hysteria2 |
+| `NODE_RELOAD_CMD` | `docker restart remnawave-node` | перезапуск ноды после продления сертификата Hysteria2; спрашивается только с `HY2_DOMAIN` |
 | `ISSUE_CDN_ORIGIN_CERT` | `true` | выпускать ли origin-сертификат для `CDN_DOMAIN` |
 | `UUID` | генерируется | в контракте с ранних версий, ни на что не влияет: пользователей ведёт панель |
 
