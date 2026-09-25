@@ -135,7 +135,6 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 | `REALITY_SNI` | `www.swiss.com` | сайт, под который маскируется Reality: TLS 1.3, рядом с сервером, открыт из России; `-` — профиль без Reality |
 | `REALITY_PRIVATE_KEY` | генерируется | x25519-ключ Reality, хранится в `.env` |
 | `REALITY_SHORT_ID` | генерируется | short id Reality |
-| `UUID` | генерируется | в контракте с ранних версий, ни на что не влияет: пользователей ведёт панель |
 
 Порты можно менять. Оба должны отличаться друг от друга и от 443, который занимают Reality и Hysteria2. После смены порта обновите инбаунд в панели (`XHTTP_PORT`) или источник ресурса Timeweb (`NGINX_TLS_PORT`).
 
