@@ -78,19 +78,19 @@ HY2_DOMAIN=hy2.example.com
 CDN_DOMAIN=cdn.example.com
 ORIGIN_IP=203.0.113.10
 XHTTP_PORT=4450
-UUID=3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f
 CF_API_TOKEN=tok-7f3a9
+REALITY_PRIVATE_KEY=c3ludGhldGljLXJlYWxpdHkta2V5LWZvci10ZXN0cyE
 EOF
   chmod 600 "$REPO/.env"
   deploy --dry-run
   [ "$status" -eq 0 ]
   has_line '^ +VLESS_DOMAIN +vless\.example\.com$'
-  has_line '^ +UUID +<hidden>$'
   has_line '^ +CF_API_TOKEN +<hidden>$'
+  has_line '^ +REALITY_PRIVATE_KEY +<hidden>$'
   has_line 'certs .*vless\.example\.com hy2\.example\.com cdn\.example\.com'
   has_line 'nginx .*:8444 cdn\.example\.com \(certificate of cdn\.example\.com\) -> 127\.0\.0\.1:4450'
   [[ "$output $(cat "$TMP/stderr")" != *tok-7f3a9* ]]
-  [[ "$output $(cat "$TMP/stderr")" != *3f1c2d4e* ]]
+  [[ "$output $(cat "$TMP/stderr")" != *c3ludGhldGljLXJl* ]]
 }
 
 @test "--dry-run plans no CDN certificate under http-01 or ISSUE_CDN_ORIGIN_CERT=false" {

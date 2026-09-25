@@ -18,7 +18,6 @@ prompt::collect() {
   for key in "${ENV_KEYS[@]}"; do
     case "$key" in
       ORIGIN_IP) prompt::_ask_origin_ip ;;
-      UUID) prompt::_ask_uuid ;;
       CF_API_TOKEN) prompt::_ask_cf_token ;;
       NODE_RELOAD_CMD) prompt::_ask_node_reload ;;
       ISSUE_CDN_ORIGIN_CERT) prompt::_ask_issue_cdn_cert ;;
@@ -69,10 +68,6 @@ prompt::validate() {
       if [[ ! "$value" =~ ^/([A-Za-z0-9._~-]+/)+$ || "$value" == */./* || "$value" == */../* ]]; then
         reason="expected a path like /api/v2.jpg/: starts and ends with /, letters, digits and . _ ~ -"
       fi
-      ;;
-    UUID)
-      [[ "$value" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] ||
-        reason="expected a UUIDv4: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
       ;;
     CERT_MODE)
       [[ "$value" == dns-cloudflare || "$value" == http-01 ]] ||
@@ -130,7 +125,7 @@ prompt::_normalize() {
       ;;
   esac
   case "$key" in
-    *_DOMAIN | UUID | CERT_MODE | REALITY_SNI | REALITY_SHORT_ID) value="${value,,}" ;;
+    *_DOMAIN | CERT_MODE | REALITY_SNI | REALITY_SHORT_ID) value="${value,,}" ;;
   esac
   printf '%s' "$value"
 }
@@ -192,7 +187,6 @@ prompt::_question() {
     XHTTP_PORT) echo "Local port of the xray xhttp inbound" ;;
     XHTTP_PATH) echo "xhttp path, the same in the panel inbound and host" ;;
     NGINX_TLS_PORT) echo "Port where nginx accepts connections from the CDN edge" ;;
-    UUID) echo "VLESS client UUID (input hidden)" ;;
     CERT_MODE) echo "Certificate issuance: dns-cloudflare or http-01" ;;
     CF_API_TOKEN) echo "Cloudflare API token with Zone:DNS:Edit (input hidden)" ;;
     LE_EMAIL) echo "Let's Encrypt contact email, - for none" ;;
@@ -281,15 +275,6 @@ prompt::_detect_ip() {
     return 1
   fi
   printf '%s' "$ip"
-}
-
-# Keeps the current UUID; without one, Enter takes a new random UUIDv4.
-prompt::_ask_uuid() {
-  if [[ -z "${UUID:-}" && -r /proc/sys/kernel/random/uuid ]]; then
-    prompt::_ask UUID "$(</proc/sys/kernel/random/uuid)" "new random"
-  else
-    prompt::_ask UUID
-  fi
 }
 
 # The command restarts the node for a renewed HY2_DOMAIN certificate; without that domain

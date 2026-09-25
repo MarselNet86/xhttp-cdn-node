@@ -168,11 +168,15 @@ is::port() {
 # Contract keys (tech.md §4) in prompt order. env::load accepts no others.
 readonly -a ENV_KEYS=(
   VLESS_DOMAIN HY2_DOMAIN CDN_DOMAIN ORIGIN_IP XHTTP_PORT XHTTP_PATH NGINX_TLS_PORT
-  UUID CERT_MODE CF_API_TOKEN LE_EMAIL NODE_RELOAD_CMD ISSUE_CDN_ORIGIN_CERT
+  CERT_MODE CF_API_TOKEN LE_EMAIL NODE_RELOAD_CMD ISSUE_CDN_ORIGIN_CERT
   REALITY_SNI REALITY_PRIVATE_KEY REALITY_SHORT_ID
 )
+# Keys an older .env holds that nothing reads anymore. env::load skips them without a
+# warning, and the next write of .env drops them. UUID was a VLESS client id: the panel
+# creates the clients, each with an id of its own.
+readonly -a ENV_RETIRED_KEYS=(UUID)
 # Values that grant access to the DNS zone or the node: never print them.
-readonly -a ENV_SECRET_KEYS=(CF_API_TOKEN UUID REALITY_PRIVATE_KEY)
+readonly -a ENV_SECRET_KEYS=(CF_API_TOKEN REALITY_PRIVATE_KEY)
 
 env::is_secret() { env::_contains "$1" "${ENV_SECRET_KEYS[@]}"; }
 
@@ -219,6 +223,9 @@ env::load() {
     [[ "$line" =~ $re_pair ]] || log::die "$EXIT_INPUT" "$file:$n: expected KEY=VALUE"
     key="${BASH_REMATCH[2]}"
     value="${BASH_REMATCH[3]}"
+    if env::_contains "$key" "${ENV_RETIRED_KEYS[@]}"; then
+      continue
+    fi
     if ! env::_contains "$key" "${ENV_KEYS[@]}"; then
       log::warn "$file:$n: unknown key $key ignored, see .env.example"
       continue

@@ -192,18 +192,27 @@ EOF
 
 @test "env::load strips comments and CRLF line endings" {
   printf '%s\r\n' 'XHTTP_PORT=4443   # local port' 'CERT_MODE="http-01"  # quoted' \
-    'UUID=# nothing yet' 'LE_EMAIL=ops#1@example.com' >"$TMP/env"
+    'HY2_DOMAIN=# nothing yet' 'LE_EMAIL=ops#1@example.com' >"$TMP/env"
   env::load "$TMP/env"
   [ "$XHTTP_PORT" = 4443 ]
   [ "$CERT_MODE" = http-01 ]
-  [ -z "$UUID" ]
+  [ -z "$HY2_DOMAIN" ]
   [ "$LE_EMAIL" = 'ops#1@example.com' ]
+}
+
+@test "env::load skips a retired key quietly and still warns about an unknown one" {
+  printf '%s\n' 'UUID=3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f' 'FOO=bar' 'XHTTP_PORT=4450' >"$TMP/env"
+  env::load "$TMP/env" 2>"$TMP/err"
+  [ -z "${UUID:-}" ]
+  [ "$XHTTP_PORT" = 4450 ]
+  [[ "$(<"$TMP/err")" != *UUID* ]]
+  [[ "$(<"$TMP/err")" == *"unknown key FOO ignored"* ]]
 }
 
 @test "env::load never executes the file" {
   cd "$TMP"
   cat >"$TMP/env" <<'EOF'
-UUID=$(touch pwned-subst)
+VLESS_DOMAIN=$(touch pwned-subst)
 LE_EMAIL=`touch pwned-backtick`
 NODE_RELOAD_CMD="$(touch pwned-quoted)"
 EOF
@@ -211,7 +220,7 @@ EOF
   # shellcheck disable=SC2016  # literal on purpose: the loader must keep it as text
   local subst='$(touch pwned-subst)' quoted='$(touch pwned-quoted)'
   env::load "$TMP/env"
-  [ "$UUID" = "$subst" ]
+  [ "$VLESS_DOMAIN" = "$subst" ]
   [ "$NODE_RELOAD_CMD" = "$quoted" ]
   [ ! -e pwned-subst ]
   [ ! -e pwned-backtick ]
@@ -323,7 +332,7 @@ EOF
   [ "$NODE_RELOAD_CMD" = "docker restart remnanode" ]
   [ "$ISSUE_CDN_ORIGIN_CERT" = true ]
   [ "$REALITY_SNI" = www.swiss.com ]
-  for key in VLESS_DOMAIN HY2_DOMAIN CDN_DOMAIN ORIGIN_IP UUID CF_API_TOKEN LE_EMAIL \
+  for key in VLESS_DOMAIN HY2_DOMAIN CDN_DOMAIN ORIGIN_IP CF_API_TOKEN LE_EMAIL \
     REALITY_PRIVATE_KEY REALITY_SHORT_ID; do
     [ -z "${!key}" ] || {
       echo "$key must have no default"

@@ -14,7 +14,6 @@ setup() {
   printf '#!/bin/sh\n[ -f "%s/ip" ] && exec cat "%s/ip"\nexit 7\n' "$TMP" "$TMP" >"$TMP/bin/curl"
   chmod +x "$TMP/bin/curl"
   PATH="$TMP/bin:$PATH"
-  UUID_V4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
 }
 
 teardown() {
@@ -28,15 +27,15 @@ collect() {
 }
 
 # Answers for a fresh .env in dns-cloudflare mode. The curl stub finds no address, so
-# ORIGIN_IP is typed; Enter takes the defaults, a random UUID and the CDN certificate.
+# ORIGIN_IP is typed; Enter takes the defaults and the CDN certificate.
 fresh() {
   collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 \
-    "" "" "" "" "" tok-7f3a9 "" "" ""
+    "" "" "" "" tok-7f3a9 "" "" ""
 }
 
-# Enter for each of the 13 questions a rerun over a complete dns-cloudflare .env asks.
+# Enter for each of the 12 questions a rerun over a complete dns-cloudflare .env asks.
 rerun_enter() {
-  collect "" "" "" "" "" "" "" "" "" "" "" "" ""
+  collect "" "" "" "" "" "" "" "" "" "" "" ""
 }
 
 mode_600() {
@@ -83,7 +82,7 @@ invalid() {
   [ "$CF_API_TOKEN" = tok-7f3a9 ]
 }
 
-@test "Enter takes the contract defaults and a random UUIDv4 that is never shown" {
+@test "Enter takes the contract defaults, and secrets are never shown" {
   local shown
   fresh
   [ "$status" -eq 0 ]
@@ -96,8 +95,6 @@ invalid() {
   [ -z "$LE_EMAIL" ]
   [ "$NODE_RELOAD_CMD" = "docker restart remnanode" ]
   [ "$ISSUE_CDN_ORIGIN_CERT" = true ]
-  [[ "$UUID" =~ $UUID_V4 ]]
-  [[ "$shown" != *"$UUID"* ]]
   [[ "$shown" != *tok-7f3a9* ]]
   [ "$REALITY_SNI" = www.swiss.com ]
   [[ "$REALITY_PRIVATE_KEY" =~ ^[A-Za-z0-9_-]{43}$ ]]
@@ -119,7 +116,7 @@ invalid() {
   [ "$REALITY_SHORT_ID" = "$sid" ]
   rm "$ENV_FILE"
   collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 \
-    "" "" "" "" "" tok-7f3a9 "" "" "" -
+    "" "" "" "" tok-7f3a9 "" "" "" -
   [ "$status" -eq 0 ]
   [[ "$output" != *"REALITY_PRIVATE_KEY"* ]]
   env::load "$ENV_FILE"
@@ -128,7 +125,7 @@ invalid() {
 
 @test "empty input repeats the question for CDN_DOMAIN, the only domain always required" {
   collect vless.example.com hy2.example.com "" cdn.example.com 203.0.113.10 \
-    "" "" "" "" "" tok-7f3a9 "" "" ""
+    "" "" "" "" tok-7f3a9 "" "" ""
   [ "$status" -eq 0 ]
   [ "$(grep -c 'WARN.*_DOMAIN: expected a domain name' <<<"$output")" -eq 1 ]
   [[ "$output" == *"CDN_DOMAIN: expected a domain name"* ]]
@@ -137,7 +134,7 @@ invalid() {
 }
 
 @test "a server that already runs VLESS and Hysteria2 skips both and gets the CDN only" {
-  collect "" - cdn.example.com 203.0.113.10 "" "" "" "" "" tok-7f3a9 "" ""
+  collect "" - cdn.example.com 203.0.113.10 "" "" "" "" tok-7f3a9 "" ""
   [ "$status" -eq 0 ]
   [ "$(grep -c -E 'WARN.*_DOMAIN|needs a certificate' <<<"$output")" -eq 0 ]
   # No Hysteria2 certificate to renew, so no node restart command to ask for.
@@ -150,23 +147,23 @@ invalid() {
 }
 
 @test "http-01 without a domain of this server asks for VLESS_DOMAIN again" {
-  collect "" "" cdn.example.com 203.0.113.10 "" "" "" "" http-01 "" "" "" "" vless.example.com
+  collect "" "" cdn.example.com 203.0.113.10 "" "" "" http-01 "" "" "" "" vless.example.com
   [ "$status" -eq 0 ]
   [[ "$output" == *"origin nginx needs a certificate: under http-01 or ISSUE_CDN_ORIGIN_CERT=false it comes from VLESS_DOMAIN"* ]]
   env::load "$ENV_FILE"
   [ "$VLESS_DOMAIN" = vless.example.com ]
   [ -z "$HY2_DOMAIN" ]
   rm "$ENV_FILE"
-  collect "" "" cdn.example.com 203.0.113.10 "" "" "" "" http-01 ""
+  collect "" "" cdn.example.com 203.0.113.10 "" "" "" http-01 ""
   [ "$status" -eq 2 ]
   [[ "$output" == *"VLESS_DOMAIN: origin nginx needs a certificate for a domain of this server"* ]]
 }
 
 @test "- clears VLESS_DOMAIN and HY2_DOMAIN kept in .env" {
   collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 \
-    "" "" "" "" "" tok-7f3a9 "" "" ""
+    "" "" "" "" tok-7f3a9 "" "" ""
   [ "$status" -eq 0 ]
-  collect - - "" "" "" "" "" "" "" "" "" ""
+  collect - - "" "" "" "" "" "" "" "" ""
   [ "$status" -eq 0 ]
   env::load "$ENV_FILE"
   [ -z "$VLESS_DOMAIN" ]
@@ -182,14 +179,13 @@ invalid() {
     443 4450 \
     api/ /cdn/v1.bin/ \
     4450 8450 \
-    not-a-uuid "" \
     dns "" \
     "tok en" tok-7f3a9 \
     ops@localhost ops@example.com \
     "a 'b' \"c\"" "" \
     maybe n
   [ "$status" -eq 0 ]
-  for key in VLESS_DOMAIN CDN_DOMAIN ORIGIN_IP XHTTP_PORT XHTTP_PATH NGINX_TLS_PORT UUID \
+  for key in VLESS_DOMAIN CDN_DOMAIN ORIGIN_IP XHTTP_PORT XHTTP_PATH NGINX_TLS_PORT \
     CERT_MODE CF_API_TOKEN LE_EMAIL NODE_RELOAD_CMD; do
     grep -qF "[WARN] $key: " <<<"$output" || {
       echo "no warning for $key"
@@ -211,7 +207,7 @@ invalid() {
   [ "$status" -eq 2 ]
   [[ "$output" == *"CDN_DOMAIN: expected a domain name"* ]]
   [ ! -e "$ENV_FILE" ]
-  collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 "" "" "" "" ""
+  collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 "" "" "" ""
   [ "$status" -eq 2 ]
   [[ "$output" == *"CF_API_TOKEN: expected a Cloudflare API token"* ]]
   [ ! -e "$ENV_FILE" ]
@@ -220,7 +216,7 @@ invalid() {
 @test "a detected IPv4 is offered and used on confirmation" {
   echo 198.51.100.7 >"$TMP/ip"
   collect vless.example.com hy2.example.com cdn.example.com "" \
-    "" "" "" "" "" tok-7f3a9 "" "" ""
+    "" "" "" "" tok-7f3a9 "" "" ""
   [ "$status" -eq 0 ]
   [[ "$output" == *"Detected public IPv4 198.51.100.7"* ]]
   env::load "$ENV_FILE"
@@ -230,7 +226,7 @@ invalid() {
 @test "declining the detected IPv4 asks for it by hand" {
   echo 198.51.100.7 >"$TMP/ip"
   collect vless.example.com hy2.example.com cdn.example.com n 203.0.113.10 \
-    "" "" "" "" "" tok-7f3a9 "" "" ""
+    "" "" "" "" tok-7f3a9 "" "" ""
   [ "$status" -eq 0 ]
   env::load "$ENV_FILE"
   [ "$ORIGIN_IP" = 203.0.113.10 ]
@@ -247,7 +243,7 @@ invalid() {
 
 @test "http-01 skips the token and forces ISSUE_CDN_ORIGIN_CERT=false" {
   collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 \
-    "" "" "" "" http-01 "" ""
+    "" "" "" http-01 "" ""
   [ "$status" -eq 0 ]
   [[ "$output" != *"CF_API_TOKEN:"* ]]
   [[ "$output" == *"ISSUE_CDN_ORIGIN_CERT=false: http-01 cannot validate CDN_DOMAIN"* ]]
@@ -273,18 +269,28 @@ invalid() {
 }
 
 @test "a rerun offers current values as defaults and never prints secrets" {
-  local uuid
+  local key
   fresh
   env::load "$ENV_FILE"
-  uuid="$UUID"
+  key="$REALITY_PRIVATE_KEY"
   run prompt::collect </dev/null
   [ "$status" -eq 0 ]
   [[ "$output" == *"VLESS_DOMAIN [vless.example.com]:"* ]]
   [[ "$output" == *"XHTTP_PATH [/api/v2.jpg/]:"* ]]
-  [[ "$output" == *"UUID [keep current]:"* ]]
   [[ "$output" == *"CF_API_TOKEN [keep current]:"* ]]
   [[ "$output" != *tok-7f3a9* ]]
-  [[ "$output" != *"$uuid"* ]]
+  [[ "$output" != *"$key"* ]]
+}
+
+@test "an older .env keeps working: its UUID is skipped quietly and dropped on the rewrite" {
+  fresh
+  printf 'UUID=3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f\n' >>"$ENV_FILE"
+  run prompt::collect </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" != *UUID* ]]
+  run grep '^UUID=' "$ENV_FILE"
+  [ "$status" -eq 1 ]
+  mode_600
 }
 
 @test "a rerun rejects an invalid value from .env instead of keeping it" {
@@ -294,14 +300,13 @@ HY2_DOMAIN=hy2.example.com
 CDN_DOMAIN=cdn.example.com
 ORIGIN_IP=203.0.113.10
 XHTTP_PORT=99999
-UUID=3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f
 CF_API_TOKEN=tok-7f3a9
 EOF
   chmod 600 "$ENV_FILE"
   run prompt::collect </dev/null
   [ "$status" -eq 2 ]
   [[ "$output" == *"XHTTP_PORT: expected a port"* ]]
-  collect "" "" "" "" "" 4450 "" "" "" "" "" "" "" ""
+  collect "" "" "" "" "" 4450 "" "" "" "" "" "" ""
   [ "$status" -eq 0 ]
   env::load "$ENV_FILE"
   [ "$XHTTP_PORT" = 4450 ]
@@ -313,7 +318,7 @@ EOF
     "sh -c 'docker restart remnawave-node'"; do
     rm -f "$ENV_FILE"
     collect vless.example.com hy2.example.com cdn.example.com 203.0.113.10 \
-      "" "" "" "" "" tok-7f3a9 "" "$cmd" ""
+      "" "" "" "" tok-7f3a9 "" "$cmd" ""
     [ "$status" -eq 0 ]
     env::load "$ENV_FILE"
     [ "$NODE_RELOAD_CMD" = "$cmd" ] || {
@@ -323,17 +328,16 @@ EOF
   done
 }
 
-@test "domains and the UUID are stored in lowercase and - clears LE_EMAIL" {
+@test "domains are stored in lowercase and - clears LE_EMAIL" {
   collect VLESS.Example.COM HY2.EXAMPLE.COM Cdn.Example.Com 203.0.113.10 "" "" "" \
-    3F1C2D4E-5A6B-4C7D-8E9F-0A1B2C3D4E5F "" tok-7f3a9 ops@example.com "" ""
+    "" tok-7f3a9 ops@example.com "" ""
   [ "$status" -eq 0 ]
   env::load "$ENV_FILE"
   [ "$VLESS_DOMAIN" = vless.example.com ]
   [ "$HY2_DOMAIN" = hy2.example.com ]
   [ "$CDN_DOMAIN" = cdn.example.com ]
-  [ "$UUID" = 3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f ]
   [ "$LE_EMAIL" = ops@example.com ]
-  collect "" "" "" "" "" "" "" "" "" "" - "" ""
+  collect "" "" "" "" "" "" "" "" "" - "" ""
   [ "$status" -eq 0 ]
   env::load "$ENV_FILE"
   [ -z "$LE_EMAIL" ]
@@ -342,7 +346,7 @@ EOF
 @test "a paste loses the invisible characters it carries, no-break spaces at the ends too" {
   local zwsp=$'\xe2\x80\x8b' nbsp=$'\xc2\xa0' bom=$'\xef\xbb\xbf' shy=$'\xc2\xad'
   collect "${bom}vless.exa${zwsp}mple.com${nbsp}" "${nbsp}hy2.example.com" "cdn.ex${shy}ample.com" \
-    203.0.113.10 "" "" "" "" "" tok-7f3a9 "" "" ""
+    203.0.113.10 "" "" "" "" tok-7f3a9 "" "" ""
   [ "$status" -eq 0 ]
   run grep -E '^\[WARN\] [A-Z0-9]+_DOMAIN:' <<<"$output"
   [ "$status" -eq 1 ]
@@ -411,9 +415,6 @@ EOF
 }
 
 @test "prompt::validate: the remaining keys follow the contract table" {
-  valid UUID 3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f "$(</proc/sys/kernel/random/uuid)"
-  invalid UUID "" not-a-uuid 3f1c2d4e-5a6b-1c7d-8e9f-0a1b2c3d4e5f \
-    3f1c2d4e-5a6b-4c7d-7e9f-0a1b2c3d4e5f 3f1c2d4e5a6b4c7d8e9f0a1b2c3d4e5f
   valid CERT_MODE dns-cloudflare http-01
   invalid CERT_MODE "" dns http http-01x
   valid CF_API_TOKEN tok-7f3a9 AbC_123-xyz
@@ -441,5 +442,7 @@ EOF
   [ "$status" -eq 1 ]
   [ "$output" = "443 belongs to xray: Reality over TCP, Hysteria2 over UDP" ]
   run prompt::validate PATH /usr/bin
+  [ "$status" -eq 1 ]
+  run prompt::validate UUID 3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f
   [ "$status" -eq 1 ]
 }
