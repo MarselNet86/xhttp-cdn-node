@@ -24,6 +24,7 @@ setup() {
   echo "10.0.0.5 $ORIGIN_IP" >"$TMP/addresses"
   respond origin 0 'HTTP/1.1 204 No Content' 'X-CDN-Origin: ok'
   respond xhttp 0 'HTTP/1.1 400 Bad Request' 'X-Cache: 8f3kd02mZq'
+  respond bare 0 'HTTP/1.1 400 Bad Request' 'X-Cache: Zq02dk3f8'
   respond cdn 0 'HTTP/2 204' 'x-cdn-origin: ok'
 }
 
@@ -57,6 +58,7 @@ case "$*" in
   *ifconfig.me*) [ -f "$STUB_DIR/public-ip" ] || exit 7; cat "$STUB_DIR/public-ip"; exit 0 ;;
   *--resolve*/cdn-check) kind=origin ;;
   *--resolve*test) kind=xhttp ;;
+  *--resolve*.jpg) kind=bare ;;
   *"/cdn-check?nocache="*) kind=cdn ;;
   *) echo "curl stub: unexpected call: $*" >&2; exit 99 ;;
 esac
@@ -97,7 +99,7 @@ calls() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"layer 1 (xray): 127.0.0.1:4443 accepts connections"* ]]
   [[ "$output" == *"layer 2 (origin nginx): /cdn-check on :8444 gives 204"* ]]
-  [[ "$output" == *"layer 3 (xhttp path): xray answers /api/v2.jpg/ through nginx with 400 and X-Cache"* ]]
+  [[ "$output" == *"layer 3 (xhttp path): xray answers /api/v2.jpg/ and /api/v2.jpg through nginx with 400 and X-Cache"* ]]
   [[ "$output" == *"layer 4 (CDN edge): https://cdn.example.com/cdn-check gives 204 from this origin"* ]]
   [[ "$output" != *WARN* ]]
 }
@@ -107,6 +109,7 @@ calls() {
   [ "$status" -eq 0 ]
   [ "$(calls '-k --resolve cdn.example.com:8444:127.0.0.1 https://cdn.example.com:8444/cdn-check$')" -eq 1 ]
   [ "$(calls '-k --resolve cdn.example.com:8444:127.0.0.1 https://cdn.example.com:8444/api/v2.jpg/test$')" -eq 1 ]
+  [ "$(calls '-k --resolve cdn.example.com:8444:127.0.0.1 https://cdn.example.com:8444/api/v2.jpg$')" -eq 1 ]
   [ "$(calls 'https://cdn.example.com/cdn-check?nocache=[0-9]')" -eq 1 ]
   [ "$(grep 'nocache=' "$TMP/calls" | grep -c -- ' -k \|--resolve')" -eq 0 ]
 }
@@ -152,6 +155,7 @@ calls() {
   jq '.streamSettings.xhttpSettings.extra.xPaddingHeader = "X-Pad"' \
     "$REPO/out/remnawave/inbound-xhttp-cdn.json" >"$TMP/in" && mv "$TMP/in" "$REPO/out/remnawave/inbound-xhttp-cdn.json"
   respond xhttp 0 'HTTP/1.1 400 Bad Request' 'x-pad: abc'
+  respond bare 0 'HTTP/1.1 400 Bad Request' 'x-pad: def'
   run validate::layers
   [ "$status" -eq 0 ]
 }
@@ -165,6 +169,14 @@ calls() {
   run validate::layers
   [ "$status" -eq 8 ]
   [[ "$output" == *"nginx cannot reach xray on 127.0.0.1:4443 (502)"* ]]
+}
+
+@test "layer 3 wants XHTTP_PATH without its trailing slash to reach xray, as Timeweb sends it" {
+  respond bare 0 'HTTP/1.1 301 Moved Permanently' 'Location: https://cdn.example.com:8444/api/v2.jpg/'
+  run validate::layers
+  [ "$status" -eq 8 ]
+  [[ "$output" == *"layer 3 (xhttp path) failed: /api/v2.jpg gave 301, not 400 with X-Cache: nginx does not pass the path without its trailing slash, which Timeweb sends"* ]]
+  [ "$(calls 'nocache=')" -eq 0 ]
 }
 
 @test "layer 4 names the cause of each CDN answer" {

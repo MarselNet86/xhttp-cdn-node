@@ -65,7 +65,14 @@ validate::_xhttp() {
     502 | 504) validate::_fail 3 "xhttp path" "nginx cannot reach xray on 127.0.0.1:$XHTTP_PORT ($status)" ;;
     *) validate::_fail 3 "xhttp path" "${XHTTP_PATH}test gave $status, not 400 with the $header padding header" ;;
   esac
-  log::info "layer 3 (xhttp path): xray answers ${XHTTP_PATH} through nginx with 400 and $header"
+  # Timeweb forwards XHTTP_PATH without its trailing slash; it has to reach xray as well.
+  headers="$(validate::_origin_request "${XHTTP_PATH%/}")" ||
+    validate::_fail 3 "xhttp path" "no answer from nginx for ${XHTTP_PATH%/}"
+  status="$(validate::_status "$headers")"
+  if [[ "$status" != 400 ]] || ! validate::_has_header "$headers" "$header"; then
+    validate::_fail 3 "xhttp path" "${XHTTP_PATH%/} gave $status, not 400 with $header: nginx does not pass the path without its trailing slash, which Timeweb sends, rerun ./deploy.sh"
+  fi
+  log::info "layer 3 (xhttp path): xray answers ${XHTTP_PATH} and ${XHTTP_PATH%/} through nginx with 400 and $header"
 }
 
 # Layer 4: the CDN edge, as clients see it. curl checks the edge certificate against
