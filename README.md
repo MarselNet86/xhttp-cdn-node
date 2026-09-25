@@ -19,7 +19,10 @@
 - **Сертификаты**, один из режимов:
   - `dns-cloudflare` (по умолчанию): зона доменов в Cloudflare и API-токен с правом `Zone:DNS:Edit` на эту зону;
   - `http-01`: порт 80 ноды открыт из интернета. Сертификат для `CDN_DOMAIN` в этом режиме не выпускается (домен смотрит на CDN), и origin использует сертификат `VLESS_DOMAIN`.
-- **CDN-ресурс:** origin указывает на `ORIGIN_IP:8444` (порт `NGINX_TLS_PORT`) по HTTPS.
+- **CDN-ресурс Timeweb:**
+  - источник: IP ноды и порт `NGINX_TLS_PORT` (8444), опция HTTPS для источника включена;
+  - домен раздачи: `CDN_DOMAIN`. Timeweb принимает только поддомен (`cdn.example.com`) с CNAME на технический домен ресурса (`*.cdn.twcstorage.ru`), сертификат выпускается в панели Timeweb (Let's Encrypt);
+  - кэширование оставьте включённым: origin отдаёт на туннель `Cache-Control: no-store`, и Timeweb по документации его соблюдает. По отчётам из чатов, с выключенным кэшем ресурс отвечает 403. «Игнорировать заголовки кэширования», «Всегда онлайн» и «Ускорение загрузки больших файлов» не включайте.
 - **Firewall:**
   - 8444/tcp открыт для CDN;
   - 443/tcp и 443/udp открыты для Reality и Hysteria2;
@@ -99,7 +102,7 @@ sudo ./deploy.sh
 |---|---|---|
 | 1. xray | `127.0.0.1:XHTTP_PORT` принимает соединения | инбаунд не добавлен в панель, или нода ещё не приняла конфиг |
 | 2. origin nginx | `/cdn-check` на `NGINX_TLS_PORT` отвечает 204 с `X-CDN-Origin` | nginx не запущен или отдаёт не сайт cdn-deploy |
-| 3. xhttp path | `XHTTP_PATH` + `test` отвечает 400 с падинг-заголовком инбаунда | 404: путь или host расходятся с панелью; 502/504: nginx не достаёт до xray |
+| 3. xhttp path | `XHTTP_PATH` + `test` и `XHTTP_PATH` без завершающего слеша отвечают 400 с падинг-заголовком инбаунда | 404: путь или host расходятся с панелью; 502/504: nginx не достаёт до xray; 301 на путь без слеша: конфиг nginx устарел |
 | 4. CDN edge | `https://CDN_DOMAIN/cdn-check` отвечает 204 от этого origin | см. ниже |
 
 Причины провала на слое 4:
@@ -118,11 +121,12 @@ sudo ./deploy.sh
 ./check.sh --fast 'https://panel.example.com/api/sub/<shortUuid>'   # только L7, без туннелей
 ```
 
-Нужны bash 4+, curl, jq, openssl и coreutils. Для туннелей нужен ещё xray: на ноде он живёт внутри контейнера, поэтому поставьте отдельный бинарь той же версии, что у ноды:
+Нужны bash 4+, curl, jq, openssl и coreutils. Для туннелей нужен ещё xray: на ноде он живёт внутри контейнера, поэтому поставьте отдельный бинарь. Версия должна быть по ту же сторону от 26.6, что и у ноды (см. «Версия xray» ниже), иначе чекер покажет FAIL на рабочих серверах:
 
 ```bash
+v=26.3.27   # версия xray на ноде
 case "$(dpkg --print-architecture)" in amd64) a=64 ;; arm64) a=arm64-v8a ;; esac
-curl -fsSLo /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-$a.zip"
+curl -fsSLo /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/v$v/Xray-linux-$a.zip"
 sudo apt-get install -y unzip && sudo unzip -o /tmp/xray.zip xray -d /usr/local/bin
 ```
 
@@ -181,7 +185,10 @@ sudo apt-get install -y unzip && sudo unzip -o /tmp/xray.zip xray -d /usr/local/
   - по документации пропускает только GET, HEAD и OPTIONS, поэтому uplink идёт в режиме packet-up через GET;
   - по отчётам из чатов на длинные URL и заголовки отвечает 403;
   - по тем же отчётам ресурс засыпает после 7 дней без запросов.
-- **Версия ноды:** по отчётам, remnawave-node 2.8.1 (xray 26.6.27) ломал xhttp через CDN, а откат на 2.7.0 (xray 26.3.27) помогал. Если CDN сломался после обновления ноды, проверьте с `check.sh`, а затем откатите версию.
+- **Версия xray:** в xray 26.6 поля сессии xhttp переименованы (`sessionPlacement` стал `sessionIDPlacement`, добавились `sessionIDTable` и `sessionIDLength`). Файлы в `remnawave/` используют новые имена, а xray до 26.6 их молча игнорирует. Поэтому нода и клиентские приложения должны быть по одну сторону: обе на xray 26.6+ или обе ниже. При смешении каждый запрос получает 400.
+  - На 26.6+ id сессии уходит в query, и URL получается ровно `XHTTP_PATH`. Timeweb срезает с него завершающий слеш. Origin принимает обе формы, а слой 3 проверки это проверяет.
+  - По отчётам, remnawave-node 2.8.1 (xray 26.6.27) «ломал CDN», а откат на 2.7.0 (xray 26.3.27) помогал. Наши тесты воспроизводят именно эту картину: origin без обработки пути без слеша отвечает на него 301.
+  - С xray 26.6+ нода по умолчанию не доверяет `X-Forwarded-For`, и все клиенты CDN видны ей как 127.0.0.1.
 - **`.env`** содержит токен Cloudflare: права 600, в git не попадает (`.gitignore`).
 
 ## Разработка
