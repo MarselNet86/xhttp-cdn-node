@@ -40,6 +40,8 @@ Environment:
                     (default http://www.gstatic.com/generate_204)
   CHECK_XRAY        xray binary for the tunnels (default: xray from PATH)
   CHECK_USER_AGENT  User-Agent for the subscription request (default v2rayNG/1.10.5)
+  CHECK_HWID        device id sent as x-hwid, which a user with a device limit needs
+                    (default: one per machine; empty sends none)
 EOF
 }
 
@@ -48,12 +50,42 @@ EOF
 # Prints one record per server: proto|addr|port|sni|host|path|params|name. params is a
 # query string: the share-link query with the credential added as uid=. name, the display
 # name of the server, is there for the report.
+# Remnawave takes the clients of a user with a device limit for devices: without x-hwid, or
+# with no free device left, it answers with placeholder servers and says why in a header.
+# The checker comes as one device per machine, named in the panel's device list.
 check::fetch() {
-  local url="$1" body rc=0
-  body="$(curl -fsSL --max-time 30 -A "$CHECK_USER_AGENT" "$url")" || rc=$?
-  ((rc == 0)) || log::die "$EXIT_FAILURE" \
-    "cannot fetch the subscription: $(check::_curl_error "$rc"). Check the URL and that the panel is up"
+  local url="$1" body rc=0 headers hwid="${CHECK_HWID-}"
+  local -a args=(-fsSL --max-time 30)
+  if [[ -z "${CHECK_HWID+set}" ]]; then
+    hwid="$(check::_hwid)"
+  fi
+  if [[ -n "$hwid" ]]; then
+    args+=(-H "x-hwid: $hwid" -H "x-device-os: Linux" -H "x-ver-os: $(uname -r)"
+      -H "x-device-model: cdn-deploy check.sh")
+  fi
+  headers="$(mktemp)"
+  body="$(curl "${args[@]}" -D "$headers" -A "$CHECK_USER_AGENT" "$url")" || rc=$?
+  if ((rc != 0)); then
+    rm -f "$headers"
+    log::die "$EXIT_FAILURE" \
+      "cannot fetch the subscription: $(check::_curl_error "$rc"). Check the URL and that the panel is up"
+  fi
+  if grep -qiE '^x-hwid-max-devices-reached: *true' "$headers"; then
+    rm -f "$headers"
+    log::die "$EXIT_FAILURE" "the panel answered with placeholders: the user of this subscription has no free device for the checker (x-hwid $hwid). Remove a device of the user in the panel, raise the limit, or check with a user without a device limit"
+  elif grep -qiE '^x-hwid-not-supported: *true' "$headers"; then
+    rm -f "$headers"
+    log::die "$EXIT_FAILURE" "the panel answered with placeholders: the user of this subscription has a device limit, and the request carried no valid x-hwid. Leave CHECK_HWID unset, or set it to 10-64 letters, digits, = and -"
+  fi
+  rm -f "$headers"
   check::parse "$body"
+}
+
+# One device per machine: a hash of /etc/machine-id, of the host name without one.
+check::_hwid() {
+  local seed
+  seed="$(cat /etc/machine-id 2>/dev/null || true)"
+  printf 'cdn-deploy-%s' "$(printf '%s' "${seed:-$(uname -n)}" | sha256sum | cut -c1-24)"
 }
 
 # Base64 share links first, as Remnawave serves them; a plain list, sing-box JSON and
@@ -663,7 +695,7 @@ check::main() {
     esac
   done
   [[ -n "$url" ]] || log::die "$EXIT_INPUT" "no subscription URL. Usage: ./check.sh [--fast] <subscription-url>"
-  require::cmd curl jq base64 openssl timeout dd od
+  require::cmd curl jq base64 openssl timeout dd od sha256sum
   subscription="$(check::fetch "$url")" || exit
   if [[ -n "$subscription" ]]; then
     mapfile -t records <<<"$subscription"

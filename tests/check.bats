@@ -63,7 +63,16 @@ stubs() {
   stub curl <<'EOF'
 printf '%s\n' "$(printf 'curl %s' "$*" | tr '\n' ' ')" >>"$STUB_DIR/calls"
 case "$*" in
-  *" -A "*) kind=sub ;;
+  *" -A "*)
+    kind=sub
+    # The panel's response headers go to the -D file: $STUB_DIR/resp/sub-headers.
+    while [ $# -gt 1 ]; do
+      if [ "$1" = -D ]; then
+        cat "$STUB_DIR/resp/sub-headers" >"$2" 2>/dev/null || true
+      fi
+      shift
+    done
+    ;;
   *--socks5-hostname*) kind=tunnel ;;
   *time_appconnect*) kind=tls ;;
   *" -D - "*) kind=xhttp ;;
@@ -180,6 +189,36 @@ fresh() {
   [ "$status" -eq 0 ]
   [ "$output" = "$(cat "$FIX/sub-links.records")" ]
   [ "$(calls ' -A v2rayNG/1.10.5 https://panel.example.com/api/sub/5qJcKxWbT$')" -eq 1 ]
+}
+
+@test "fetch comes as one device per machine, and without x-hwid when CHECK_HWID is empty" {
+  local first
+  serve "$FIX/sub-base64.txt"
+  run check::fetch https://panel.example.com/api/sub/5qJcKxWbT
+  [ "$status" -eq 0 ]
+  first="$(grep -o 'x-hwid: cdn-deploy-[0-9a-f]*' "$TMP/calls")"
+  [[ "$first" =~ ^x-hwid:\ cdn-deploy-[0-9a-f]{24}$ ]]
+  grep -q 'x-device-model: cdn-deploy check.sh' "$TMP/calls"
+  run check::fetch https://panel.example.com/api/sub/5qJcKxWbT
+  [ "$(grep -o 'x-hwid: cdn-deploy-[0-9a-f]*' "$TMP/calls" | sort -u)" = "$first" ]
+  : >"$TMP/calls"
+  CHECK_HWID="" run check::fetch https://panel.example.com/api/sub/5qJcKxWbT
+  [ "$status" -eq 0 ]
+  run grep -c x-hwid "$TMP/calls"
+  [ "$output" -eq 0 ]
+}
+
+@test "placeholders for a missing device id or a full device limit exit 1 with the cause" {
+  serve "$FIX/sub-base64.txt"
+  printf 'HTTP/1.1 200 OK\r\nx-hwid-limit: true\r\nx-hwid-max-devices-reached: true\r\n\r\n' \
+    >"$TMP/resp/sub-headers"
+  run check::fetch https://panel.example.com/api/sub/x
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"the user of this subscription has no free device for the checker (x-hwid cdn-deploy-"* ]]
+  printf 'HTTP/1.1 200 OK\r\nx-hwid-not-supported: true\r\n\r\n' >"$TMP/resp/sub-headers"
+  CHECK_HWID="" run check::fetch https://panel.example.com/api/sub/x
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"has a device limit, and the request carried no valid x-hwid"* ]]
 }
 
 @test "a failed fetch, a web page or a body without links exits 1 with the cause" {
