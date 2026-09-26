@@ -220,7 +220,7 @@ git clone https://github.com/MarselNet86/xhttp-cdn-node.git && cd xhttp-cdn-node
 **Что нужно.** bash 4+, curl, jq, openssl и coreutils. Root не нужен, система не меняется. Для туннелей нужен xray, а на ноде он живёт внутри контейнера, поэтому поставьте отдельный бинарь:
 
 ```sh
-v=26.3.27   # версия xray на ноде
+v=26.7.28   # версия xray на ноде: docker exec remnanode rw-core version
 case "$(dpkg --print-architecture)" in amd64) a=64 ;; arm64) a=arm64-v8a ;; esac
 curl -fsSLo /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/v$v/Xray-linux-$a.zip"
 sudo apt-get install -y unzip && sudo unzip -o /tmp/xray.zip xray -d /usr/local/bin
